@@ -1,0 +1,66 @@
+configuration:
+  startdatum:
+    name: Startdatum
+    description: Ab diesem Tag wird rückwirkend gerechnet (YYYY-MM-DD). Früher als die Langzeitstatistik des Zählers geht nicht.
+  statistik_netzbezug:
+    name: Statistik Netzbezug
+    description: Zählerstand Bezug (kWh, total_increasing), z. B. sensor.ebz_energy_in
+  statistik_einspeisung:
+    name: Statistik Einspeisung
+    description: Zählerstand Einspeisung (kWh), z. B. sensor.ebz_energy_out
+  festpreis_arbeitspreis_ct_brutto:
+    name: Festpreis Arbeitspreis (ct/kWh brutto)
+  festpreis_grundpreis_eur_jahr_brutto:
+    name: Festpreis Grundpreis (€/Jahr brutto)
+  mwst_prozent:
+    name: Mehrwertsteuer (%)
+  netzentgelt_ct_netto:
+    name: Netzentgelt Arbeitspreis (ct/kWh netto)
+  aufschlag_netznutzung_ct_netto:
+    name: Aufschlag besondere Netznutzung §19 (ct/kWh netto)
+  kwkg_umlage_ct_netto:
+    name: KWKG-Umlage (ct/kWh netto)
+  offshore_umlage_ct_netto:
+    name: Offshore-Umlage (ct/kWh netto)
+  stromsteuer_ct_netto:
+    name: Stromsteuer (ct/kWh netto)
+  konzessionsabgabe_ct_netto:
+    name: Konzessionsabgabe (ct/kWh netto)
+  netz_grundpreis_eur_jahr_netto:
+    name: Netz-Grundpreis (€/Jahr netto)
+  dyn_aufschlag_ct_netto:
+    name: Tibber-Aufschlag auf Börsenpreis (ct/kWh netto)
+    description: Beschaffungskosten/Marge des dynamischen Anbieters. Bitte mit dem Tibber-Preisrechner für eure PLZ abgleichen.
+  dyn_grundgebuehr_eur_monat_brutto:
+    name: Grundgebühr dynamischer Anbieter (€/Monat brutto)
+  messstelle_dyn_eur_jahr_brutto:
+    name: Messstellenbetrieb Smart Meter (€/Jahr brutto)
+    description: Ein dynamischer Tarif braucht ein intelligentes Messsystem (iMSys). Kosten laut grundzuständigem Messstellenbetreiber.
+  einspeiseverguetung_ct:
+    name: Einspeisevergütung (ct/kWh)
+  ev_verschiebung:
+    name: Szenario E-Auto-Ladeverschiebung
+  ev_statistiken:
+    name: Statistiken Wallbox-Energie
+    description: Zählerstände der Wallboxen (kWh oder Wh), werden summiert.
+  ev_max_kw:
+    name: Max. Ladeleistung E-Autos gesamt (kW)
+  ev_abend_ab_uhr:
+    name: Verschiebbar für Ladestarts ab (Uhr)
+  ev_fertig_bis_uhr:
+    name: Laden fertig bis (Uhr)
+  akku_arbitrage:
+    name: Szenario Akku-Netzladung
+  akku_soc_statistik:
+    name: Statistik Akku-Ladestand (%)
+  akku_kapazitaet_kwh:
+    name: Akku nutzbare Kapazität (kWh)
+  akku_max_netzladeleistung_kw:
+    name: Akku max. Netzladeleistung (kW)
+  akku_wirkungsgrad:
+    name: Akku Wirkungsgrad Rundlauf (0.5–1)
+  akku_mindest_spread_ct:
+    name: Akku Mindest-Preisabstand (ct/kWh)
+    description: Netzladung nur, wenn späterer Preis × Wirkungsgrad mindestens so viel teurer ist (deckt Verschleiß ab).
+  log_level:
+    name: Log-Level
