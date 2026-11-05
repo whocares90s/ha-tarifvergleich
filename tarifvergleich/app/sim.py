@@ -57,7 +57,7 @@ def breakdown(o: dict) -> dict:
     return {
         "mwst_faktor": v,
         "aufschlaege_ct_netto": {
-            "Tibber-Aufschlag (Beschaffung/Marge)": o["dyn_aufschlag_ct_netto"],
+            "Strombeschaffungskosten (Tibber)": o["dyn_aufschlag_ct_netto"],
             "Netzentgelt": o["netzentgelt_ct_netto"],
             "Aufschlag besondere Netznutzung (§19)": o["aufschlag_netznutzung_ct_netto"],
             "KWKG-Umlage": o["kwkg_umlage_ct_netto"],

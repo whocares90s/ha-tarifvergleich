@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- „Tibber-Aufschlag“ heißt jetzt „Strombeschaffungskosten“; Standard 1,807 ct netto (= 2,15 ct brutto laut Tibber)
+
 ## 0.3.1
 
 - Akku-Ersparnis wird dem Ladetag zugeordnet (vorher Verzerrung, wenn über Mitternacht entladen wurde)

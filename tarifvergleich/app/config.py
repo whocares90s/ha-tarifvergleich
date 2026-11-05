@@ -24,7 +24,7 @@ DEFAULTS: dict = {
     "stromsteuer_ct_netto": 2.05,
     "konzessionsabgabe_ct_netto": 1.59,
     "netz_grundpreis_eur_jahr_netto": 76.65,
-    "dyn_aufschlag_ct_netto": 2.0,
+    "dyn_aufschlag_ct_netto": 1.807,
     "dyn_grundgebuehr_eur_monat_brutto": 5.99,
     "messstelle_dyn_eur_jahr_brutto": 50.0,
     "einspeiseverguetung_ct": 7.9,

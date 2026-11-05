@@ -34,8 +34,8 @@ configuration:
   netz_grundpreis_eur_jahr_netto:
     name: Netz-Grundpreis (€/Jahr netto)
   dyn_aufschlag_ct_netto:
-    name: Tibber-Aufschlag auf Börsenpreis (ct/kWh netto)
-    description: Beschaffungskosten/Marge des dynamischen Anbieters. Bitte mit dem Tibber-Preisrechner für eure PLZ abgleichen.
+    name: Strombeschaffungskosten (ct/kWh netto)
+    description: Prozesspauschale des Anbieters auf den Börsenpreis (Tibber 2026 – 2,15 ct brutto = 1,807 ct netto). Tibber selbst schlägt keine Marge auf, verdient nur an der Grundgebühr.
   dyn_grundgebuehr_eur_monat_brutto:
     name: Grundgebühr dynamischer Anbieter (€/Monat brutto)
   messstelle_dyn_eur_jahr_brutto:
