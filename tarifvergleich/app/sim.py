@@ -1,6 +1,13 @@
-"""Kostenrechnung Festpreis vs. dynamischer Tarif und Lastverschiebungs-Szenario.
+"""Kostenrechnung Festpreis vs. dynamischer Tarif und Lastverschiebungs-Szenarien.
 
 Alle Energiewerte in kWh je Stunde, Preise in ct/kWh brutto, Kosten in EUR.
+
+Szenarien (jeweils mit dynamischem Preis):
+  dyn       – Verbrauch wie gemessen
+  dyn_ev    – nur E-Auto-Ladung verschoben
+  dyn_wp    – nur Wärmepumpe verschoben (Heizung + Warmwasser)
+  dyn_bat   – nur Hausakku lädt günstig aus dem Netz
+  dyn_all   – alle vorhandenen Maßnahmen kombiniert (WP -> E-Auto -> Akku)
 """
 from __future__ import annotations
 
@@ -72,7 +79,10 @@ def breakdown(o: dict) -> dict:
     }
 
 
-# --------------------------------------------------------------------------- Verschiebung
+# --------------------------------------------------------------------------- E-Auto
+EMPTY_EV = {"sitzungen": 0, "kwh_verschoben": 0.0, "ersparnis_eur": 0.0}
+
+
 def shift_ev(hours, imp, ev, price, o, tz: ZoneInfo):
     """Netzbezug von Abend-/Nacht-Ladevorgängen in die günstigsten Stunden bis
     zur Fertig-Uhrzeit verschieben. Tagsüber-Ladevorgänge (meist PV) bleiben."""
@@ -156,10 +166,15 @@ def shift_ev(hours, imp, ev, price, o, tz: ZoneInfo):
     return new, {"sitzungen": sessions, "kwh_verschoben": moved_kwh, "ersparnis_eur": saved_eur}
 
 
+# --------------------------------------------------------------------------- Hausakku
+EMPTY_BAT = {"kwh_netzladung": 0.0, "kwh_entladen": 0.0, "vollzyklen": 0.0, "ersparnis_eur": 0.0}
+
+
 def battery_arbitrage(hours, imp, soc, price, o):
     """Akku in günstigen Stunden aus dem Netz laden und damit späteren teuren
     Netzbezug ersetzen. Freie Kapazität kommt aus dem realen SoC-Verlauf, so dass
-    PV-Ladung nicht verdrängt wird. Greedy über die Paare mit größtem Spread."""
+    PV-Ladung nicht verdrängt wird – an PV-armen Tagen ist der Akku leer und es
+    wird entsprechend viel Netzladung möglich. Greedy über die Paare mit größtem Spread."""
     n = len(hours)
     cap = float(o["akku_kapazitaet_kwh"])
     maxkw = float(o["akku_max_netzladeleistung_kw"])
@@ -210,95 +225,140 @@ def battery_arbitrage(hours, imp, soc, price, o):
         "kwh_entladen": total_in * eta,
         "vollzyklen": total_in / cap if cap else 0.0,
         "ersparnis_eur": saved_ct / 100.0,
-    }
+    }, charged, discharged
 
 
-def shift_heatpump(hours, imp, wp, price, o):
-    """Wärmepumpe: ein Anteil ihres Netzbezugs jeder Stunde darf innerhalb von
-    ±Fenster Stunden in billigere Stunden wandern (Vorheizen/Nachlaufen über die
-    thermische Speichermasse). Verschobene Energie kostet einen Mehrverbrauch
-    (schlechtere JAZ bei höherer Vorlauftemperatur). Teuerste Stunden zuerst."""
-    n = len(hours)
-    frac = float(o["wp_anteil_verschiebbar"])
-    win = int(o["wp_fenster_h"])
-    maxkw = float(o["wp_max_kw"])
-    pen = 1.0 + float(o["wp_mehrverbrauch_prozent"]) / 100.0
-    spread = float(o["wp_mindest_spread_ct"])
+# --------------------------------------------------------------------------- Wärmepumpe
+def _empty_shift() -> dict:
+    return {"kwh_netz": 0.0, "kwh_verschoben": 0.0, "kwh_mehrverbrauch": 0.0, "ersparnis_eur": 0.0, "stunden": 0}
 
-    new = list(imp)
-    # Netzanteil der WP: WP-Verbrauch, soweit in der Stunde Netzbezug da war
-    grid = [max(0.0, min(wp[h], imp[h])) for h in range(n)]
-    grid_new = list(grid)
-    load = [max(0.0, w) for w in wp]
+
+EMPTY_WP = {"wp_netz_kwh": 0.0, "kwh_verschoben": 0.0, "kwh_mehrverbrauch": 0.0, "ersparnis_eur": 0.0,
+            "heizung": _empty_shift(), "warmwasser": _empty_shift()}
+
+
+def split_heatpump(wp, pmax, o):
+    """WP-Energie je Stunde in Heizung und Warmwasser aufteilen. Eine Stunde gilt
+    als Warmwasser-Stunde, wenn die Spitzenleistung die Schwelle erreicht; der
+    WW-Anteil ist der Verbrauch über dem mittleren Heizbedarf der Nachbarstunden."""
+    n = len(wp)
+    thr = float(o["ww_schwelle_w"])
+    is_ww = [pm is not None and pm >= thr for pm in pmax]
+    heat, dhw = list(wp), [0.0] * n
+    for h in range(n):
+        if not is_ww[h] or wp[h] <= 0:
+            continue
+        nb = [wp[k] for k in range(max(0, h - 3), min(n, h + 4)) if k != h and not is_ww[k]]
+        base = sum(nb) / len(nb) if nb else 0.0
+        dhw[h] = max(0.0, wp[h] - min(base, wp[h]))
+        heat[h] = wp[h] - dhw[h]
+    return heat, dhw, is_ww
+
+
+def _greedy_shift(n, price, grid, load, cap_kw, frac, win, pen, spread):
+    """Teuerste Stunden zuerst entlasten: frac·grid[j] wandert in die billigsten
+    Stunden im Fenster ±win, solange load[i] < cap_kw. load wird fortgeschrieben."""
+    delta = [0.0] * n
     moved = extra = saved_ct = 0.0
-
     order = sorted((h for h in range(n) if price[h] is not None and grid[h] > 0.01), key=lambda h: -price[h])
     for j in order:
         m = frac * grid[j]
-        cands = [
-            i for i in range(max(0, j - win), min(n, j + win + 1))
-            if i != j and price[i] is not None and price[i] * pen + spread <= price[j]
-        ]
+        cands = [i for i in range(max(0, j - win), min(n, j + win + 1))
+                 if i != j and price[i] is not None and price[i] * pen + spread <= price[j]]
         cands.sort(key=lambda i: price[i])
         for i in cands:
             if m <= 0.01:
                 break
-            cap = maxkw - load[i]
+            cap = cap_kw - load[i]
             if cap <= 0.01:
                 continue
             x = min(m, cap / pen)
             load[i] += x * pen
             load[j] -= x
-            new[i] += x * pen
-            new[j] -= x
-            grid_new[i] += x * pen
-            grid_new[j] -= x
+            delta[i] += x * pen
+            delta[j] -= x
             m -= x
             moved += x
             extra += x * (pen - 1.0)
             saved_ct += x * (price[j] - price[i] * pen)
+    return delta, {"kwh_verschoben": moved, "kwh_mehrverbrauch": extra, "ersparnis_eur": saved_ct / 100.0}
 
+
+def shift_heatpump(hours, imp, wp, pmax, price, o):
+    """Warmwasser (Speicher, sehr flexibel) und Heizung (thermische Masse, begrenzt)
+    getrennt verschieben. Als WP-Netzanteil zählt der WP-Verbrauch, soweit in der
+    Stunde Netzbezug da war; er wird anteilig auf Heizung/Warmwasser verteilt."""
+    n = len(hours)
+    spread = float(o["wp_mindest_spread_ct"])
+    heat, dhw, is_ww = split_heatpump(wp, pmax, o)
+    grid = [max(0.0, min(wp[h], imp[h])) for h in range(n)]
+    g_ww = [grid[h] * dhw[h] / wp[h] if wp[h] > 0 else 0.0 for h in range(n)]
+    g_heat = [grid[h] - g_ww[h] for h in range(n)]
+
+    # 1) Warmwasser: ganze Ladung verschiebbar, bis zur WW-Leistung
+    load_all = [max(0.0, w) for w in wp]
+    d_ww, i_ww = _greedy_shift(n, price, g_ww, load_all, float(o["ww_max_kw"]), 1.0, int(o["ww_fenster_h"]),
+                               1.0 + float(o["ww_mehrverbrauch_prozent"]) / 100.0, spread)
+    # 2) Heizung: Anteil verschiebbar, begrenzt durch die Heizleistung
+    load_heat = [max(0.0, x) for x in heat]
+    d_h, i_h = _greedy_shift(n, price, g_heat, load_heat, float(o["wp_heiz_max_kw"]),
+                             float(o["wp_heiz_anteil_verschiebbar"]), int(o["wp_heiz_fenster_h"]),
+                             1.0 + float(o["wp_heiz_mehrverbrauch_prozent"]) / 100.0, spread)
+
+    new = [imp[h] + d_ww[h] + d_h[h] for h in range(n)]
+    grid_new = [grid[h] + d_ww[h] + d_h[h] for h in range(n)]
+    i_ww.update(kwh_netz=sum(g_ww), stunden=sum(1 for x in is_ww if x))
+    i_h.update(kwh_netz=sum(g_heat), stunden=0)
     info = {
         "wp_netz_kwh": sum(grid),
-        "kwh_verschoben": moved,
-        "kwh_mehrverbrauch": extra,
-        "ersparnis_eur": saved_ct / 100.0,
+        "kwh_verschoben": i_ww["kwh_verschoben"] + i_h["kwh_verschoben"],
+        "kwh_mehrverbrauch": i_ww["kwh_mehrverbrauch"] + i_h["kwh_mehrverbrauch"],
+        "ersparnis_eur": i_ww["ersparnis_eur"] + i_h["ersparnis_eur"],
+        "heizung": i_h,
+        "warmwasser": i_ww,
     }
-    return new, grid, grid_new, info
+    return new, grid, grid_new, g_ww, info
 
 
 # --------------------------------------------------------------------------- Simulation
-EMPTY_EV = {"sitzungen": 0, "kwh_verschoben": 0.0, "ersparnis_eur": 0.0}
-EMPTY_BAT = {"kwh_netzladung": 0.0, "kwh_entladen": 0.0, "vollzyklen": 0.0, "ersparnis_eur": 0.0}
+def available(o: dict, ev, soc, wp) -> dict:
+    """Welche Maßnahmen sind laut Einstellungen vorhanden und haben Daten?"""
+    return {
+        "ev": bool(o.get("e_auto_vorhanden")) and any(v > 0 for v in ev),
+        "wp": bool(o.get("waermepumpe_vorhanden")) and any(v > 0 for v in wp),
+        "akku": bool(o.get("hausakku_vorhanden")) and any(s is not None for s in soc),
+    }
 
 
-def _ev_and_battery(hours, base, ev, soc, price, o, tz):
-    out, ev_info, bat_info = list(base), dict(EMPTY_EV), dict(EMPTY_BAT)
-    if o.get("ev_verschiebung") and any(v > 0 for v in ev):
-        out, ev_info = shift_ev(hours, out, ev, price, o, tz)
-    if o.get("akku_arbitrage") and any(s is not None for s in soc):
-        out, bat_info = battery_arbitrage(hours, out, soc, price, o)
-    return out, ev_info, bat_info
-
-
-def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None) -> dict:
-    """hours: Liste Unix-Stundenbeginn; imp/exp/ev/wp: kWh je Stunde; soc: % oder None;
-    spot: €/MWh oder None."""
+def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=None, pv=None) -> dict:
+    """hours: Unix-Stundenbeginn; imp/exp/ev/wp/pv: kWh je Stunde; soc: % oder None;
+    wp_pmax: Spitzenleistung WP in W oder None; spot: €/MWh oder None."""
     n = len(hours)
-    wp = wp if wp is not None else [0.0] * n
+    zeros = [0.0] * n
+    wp = wp if wp is not None else zeros
+    wp_pmax = wp_pmax if wp_pmax is not None else [None] * n
+    pv = pv if pv is not None else zeros
     price = [dyn_price_ct(s, o) if s is not None else None for s in spot]
+    have = available(o, ev, soc, wp)
 
-    # Szenario A: E-Auto + Akku (unverändert gegenüber v0.1)
-    opt, ev_info, bat_info = _ev_and_battery(hours, imp, ev, soc, price, o, tz)
+    # --- jede Maßnahme isoliert (Vergleich jeweils gegen "dyn")
+    imp_ev, ev_info = shift_ev(hours, imp, ev, price, o, tz) if have["ev"] else (imp, dict(EMPTY_EV))
+    if have["wp"]:
+        imp_wp, wp_grid, wp_grid_new, wp_ww, wp_info = shift_heatpump(hours, imp, wp, wp_pmax, price, o)
+    else:
+        imp_wp, wp_grid, wp_grid_new, wp_ww, wp_info = imp, zeros, zeros, zeros, dict(EMPTY_WP)
+    if have["akku"]:
+        imp_bat, bat_info, bat_in, bat_out = battery_arbitrage(hours, imp, soc, price, o)
+    else:
+        imp_bat, bat_info, bat_in, bat_out = imp, dict(EMPTY_BAT), zeros, zeros
 
-    # Szenario B: nur Wärmepumpe – getrennt, damit der Effekt isoliert sichtbar ist
-    imp_wp, wp_grid, wp_grid_new = list(imp), [0.0] * n, [0.0] * n
-    wp_info = {"wp_netz_kwh": 0.0, "kwh_verschoben": 0.0, "kwh_mehrverbrauch": 0.0, "ersparnis_eur": 0.0}
-    if o.get("wp_verschiebung") and any(v > 0 for v in wp):
-        imp_wp, wp_grid, wp_grid_new, wp_info = shift_heatpump(hours, imp, wp, price, o)
-
-    # Szenario C: alle Maßnahmen (erst WP, dann E-Auto + Akku auf dem Rest)
-    imp_all, all_ev, all_bat = _ev_and_battery(hours, imp_wp, ev, soc, price, o, tz)
+    # --- alle Maßnahmen kombiniert: erst WP, dann E-Auto, dann Akku auf dem Rest
+    imp_all = imp_wp
+    all_ev, all_bat = dict(EMPTY_EV), dict(EMPTY_BAT)
+    if have["ev"]:
+        imp_all, all_ev = shift_ev(hours, imp_all, ev, price, o, tz)
+    if have["akku"]:
+        imp_all, all_bat, _, _ = battery_arbitrage(hours, imp_all, soc, price, o)
 
     fix_ct = float(o["festpreis_arbeitspreis_ct_brutto"])
     fix_h = fix_fixed_eur_year(o) / HOURS_PER_YEAR
@@ -312,32 +372,37 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None) -> dict:
             missing += 1
             continue
         p = price[k]
+        cost = lambda e: e * p / 100.0 + dyn_h  # noqa: E731
         rows.append(
             {
                 "t": hours[k],
                 "imp": imp[k],
-                "opt": opt[k],
                 "exp": exp[k],
+                "pv": pv[k],
                 "ev": ev[k],
                 "soc": soc[k],
                 "spot": spot[k] / 10.0,
                 "p": p,
                 "fix": imp[k] * fix_ct / 100.0 + fix_h,
-                "dyn": imp[k] * p / 100.0 + dyn_h,
-                "dyn_opt": opt[k] * p / 100.0 + dyn_h,
+                "dyn": cost(imp[k]),
+                "dyn_ev": cost(imp_ev[k]),
+                "dyn_wp": cost(imp_wp[k]),
+                "dyn_bat": cost(imp_bat[k]),
+                "dyn_all": cost(imp_all[k]),
+                "imp_all": imp_all[k],
                 "feed": exp[k] * feed_ct / 100.0,
                 "wp_grid": wp_grid[k],
                 "wp_grid_new": wp_grid_new[k],
-                "imp_wp": imp_wp[k],
-                "dyn_wp": imp_wp[k] * p / 100.0 + dyn_h,
-                "imp_all": imp_all[k],
-                "dyn_all": imp_all[k] * p / 100.0 + dyn_h,
+                "wp_ww": wp_ww[k],
+                "bat_in": bat_in[k],
+                "bat_out": bat_out[k],
             }
         )
 
     return {
         "rows": rows,
         "missing_hours": missing,
+        "vorhanden": have,
         "ev": ev_info,
         "akku": bat_info,
         "wp": wp_info,
@@ -345,8 +410,8 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None) -> dict:
     }
 
 
-SUM_KEYS = ("imp", "opt", "exp", "fix", "dyn", "dyn_opt", "feed",
-            "wp_grid", "wp_grid_new", "imp_wp", "dyn_wp", "imp_all", "dyn_all")
+SUM_KEYS = ("imp", "exp", "pv", "ev", "fix", "dyn", "dyn_ev", "dyn_wp", "dyn_bat", "dyn_all", "imp_all",
+            "feed", "wp_grid", "wp_grid_new", "wp_ww", "bat_in", "bat_out")
 
 
 def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
@@ -376,9 +441,24 @@ def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
     return result
 
 
+def pv_poor_days(daily: list[dict], threshold_kwh: float) -> dict:
+    """Akku-Netzladung an PV-armen Tagen auswerten (nur sinnvoll mit PV-Statistik)."""
+    poor = [d for d in daily if d["pv"] < threshold_kwh]
+    with_charge = [d for d in poor if d["bat_in"] > 0.1]
+    return {
+        "schwelle_kwh": threshold_kwh,
+        "tage_gesamt": len(daily),
+        "tage_pv_arm": len(poor),
+        "tage_mit_netzladung": len(with_charge),
+        "kwh_netzladung": sum(d["bat_in"] for d in poor),
+        "ersparnis_eur": sum(d["dyn"] - d["dyn_bat"] for d in poor),
+        "kwh_netzladung_gesamt": sum(d["bat_in"] for d in daily),
+    }
+
+
 def hour_profile(rows: list[dict], tz: ZoneInfo) -> list[dict]:
     """Mittlerer Preis und mittlerer Bezug je Stunde des Tages."""
-    keys = ("p", "imp", "opt", "wp_grid", "wp_grid_new")
+    keys = ("p", "imp", "imp_all", "wp_grid", "wp_grid_new", "bat_in")
     acc = [{"h": h, "n": 0, **{k: 0.0 for k in keys}} for h in range(24)]
     for r in rows:
         a = acc[dt.datetime.fromtimestamp(r["t"], tz).hour]

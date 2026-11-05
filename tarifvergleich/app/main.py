@@ -24,17 +24,23 @@ PORT = int(os.environ.get("PORT", "8099"))
 STAT_IDS = {
     "fix": ("tarifvergleich:kosten_festpreis", "Tarifvergleich Kosten Festpreis"),
     "dyn": ("tarifvergleich:kosten_dynamisch", "Tarifvergleich Kosten dynamisch"),
-    "dyn_opt": ("tarifvergleich:kosten_dynamisch_optimiert", "Tarifvergleich Kosten dynamisch + Verschiebung"),
-    "dyn_wp": ("tarifvergleich:kosten_dynamisch_wp", "Tarifvergleich Kosten dynamisch + WP-Verschiebung"),
-    "dyn_all": ("tarifvergleich:kosten_dynamisch_alle", "Tarifvergleich Kosten dynamisch + alle Maßnahmen"),
+    "dyn_all": ("tarifvergleich:kosten_dynamisch_optimiert", "Tarifvergleich Kosten dynamisch + Lastverschiebung"),
 }
-OPTION_KEYS = (
-    "startdatum", "ev_verschiebung", "akku_arbitrage", "ev_max_kw", "ev_abend_ab_uhr", "ev_fertig_bis_uhr",
-    "akku_kapazitaet_kwh", "akku_max_netzladeleistung_kw", "akku_wirkungsgrad", "akku_mindest_spread_ct",
-    "einspeiseverguetung_ct", "wp_verschiebung", "wp_anteil_verschiebbar", "wp_fenster_h", "wp_max_kw",
-    "wp_mehrverbrauch_prozent", "wp_mindest_spread_ct",
-)
 PRICE_STAT = ("tarifvergleich:preis_dynamisch", "Tarifvergleich Preis dynamisch")
+# aus v0.2.0, werden einmalig entfernt
+OBSOLETE_STATS = ["tarifvergleich:kosten_dynamisch_wp", "tarifvergleich:kosten_dynamisch_alle"]
+OBSOLETE_STATES = ["sensor.tarifvergleich_kosten_dynamisch_wp", "sensor.tarifvergleich_ersparnis_wp",
+                   "sensor.tarifvergleich_kosten_dynamisch_alle"]
+
+OPTION_KEYS = (
+    "startdatum", "einspeiseverguetung_ct", "pv_wenig_kwh_tag",
+    "e_auto_vorhanden", "ev_max_kw", "ev_abend_ab_uhr", "ev_fertig_bis_uhr",
+    "waermepumpe_vorhanden", "wp_heiz_anteil_verschiebbar", "wp_heiz_fenster_h", "wp_heiz_max_kw",
+    "wp_heiz_mehrverbrauch_prozent", "ww_schwelle_w", "ww_fenster_h", "ww_max_kw", "ww_mehrverbrauch_prozent",
+    "wp_mindest_spread_ct",
+    "hausakku_vorhanden", "akku_kapazitaet_kwh", "akku_max_netzladeleistung_kw", "akku_wirkungsgrad",
+    "akku_mindest_spread_ct",
+)
 
 
 def _iso(ts: int) -> str:
@@ -49,6 +55,21 @@ def _series(stats: dict, sid: str, key: str) -> dict[int, float]:
             continue
         out[ts_of(row["start"])] = float(val)
     return out
+
+
+def _r(v, nd: int = 2):
+    return round(v, nd) if isinstance(v, (int, float)) else v
+
+
+def _read_state() -> dict:
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def _write_state(state: dict) -> None:
+    STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
 
 
 class Engine:
@@ -86,55 +107,65 @@ class Engine:
 
         await prices.refresh(self.store, self.session, start_date)
 
-        ev_ids = list(o.get("ev_statistiken") or []) if o.get("ev_verschiebung") else []
-        wp_id = o.get("wp_statistik") if o.get("wp_verschiebung") else ""
-        energy_ids = [o["statistik_netzbezug"], o["statistik_einspeisung"], *ev_ids]
+        ev_ids = [s for s in (o.get("ev_statistiken") or []) if s] if o.get("e_auto_vorhanden") else []
+        wp_id = (o.get("wp_statistik") or "") if o.get("waermepumpe_vorhanden") else ""
+        wp_p_id = (o.get("wp_leistung_statistik") or "") if o.get("waermepumpe_vorhanden") else ""
+        soc_id = (o.get("akku_soc_statistik") or "") if o.get("hausakku_vorhanden") else ""
+        pv_ids = [s for s in (o.get("pv_statistiken") or []) if s]
+
+        energy_ids = [o["statistik_netzbezug"], o["statistik_einspeisung"], *ev_ids, *pv_ids]
         if wp_id:
             energy_ids.append(wp_id)
         stats = await self.ha.statistics(energy_ids, start, end, ["change"], {"energy": "kWh"})
-        soc_stats = {}
-        if o.get("akku_arbitrage") and o.get("akku_soc_statistik"):
-            soc_stats = await self.ha.statistics([o["akku_soc_statistik"]], start, end, ["mean"])
+        soc_stats = await self.ha.statistics([soc_id], start, end, ["mean"]) if soc_id else {}
+        pmax_stats = await self.ha.statistics([wp_p_id], start, end, ["max"], {"power": "W"}) if wp_p_id else {}
 
         imp_d = _series(stats, o["statistik_netzbezug"], "change")
         if not imp_d:
             raise HAError(f"Keine Statistik für {o['statistik_netzbezug']} gefunden")
         exp_d = _series(stats, o["statistik_einspeisung"], "change")
         ev_ds = [_series(stats, sid, "change") for sid in ev_ids]
-        soc_d = _series(soc_stats, o.get("akku_soc_statistik", ""), "mean")
+        pv_ds = [_series(stats, sid, "change") for sid in pv_ids]
         wp_d = _series(stats, wp_id, "change") if wp_id else {}
+        soc_d = _series(soc_stats, soc_id, "mean") if soc_id else {}
+        pmax_d = _series(pmax_stats, wp_p_id, "max") if wp_p_id else {}
 
         first = max(int(start.timestamp()), min(imp_d))
         hours = list(range(first, int(end.timestamp()), 3600))
         spot_d = self.store.get(first, int(end.timestamp()))
 
         # negative "change"-Werte (Zählertausch/Reset) ignorieren
-        imp = [max(0.0, imp_d.get(h, 0.0)) for h in hours]
-        exp = [max(0.0, exp_d.get(h, 0.0)) for h in hours]
-        ev = [sum(max(0.0, d.get(h, 0.0)) for d in ev_ds) for h in hours]
+        pos = lambda d, h: max(0.0, d.get(h, 0.0))  # noqa: E731
+        imp = [pos(imp_d, h) for h in hours]
+        exp = [pos(exp_d, h) for h in hours]
+        ev = [sum(pos(d, h) for d in ev_ds) for h in hours]
+        pv = [sum(pos(d, h) for d in pv_ds) for h in hours]
+        wp = [pos(wp_d, h) for h in hours]
+        wp_pmax = [pmax_d.get(h) for h in hours]
         soc = [soc_d.get(h) for h in hours]
         spot = [spot_d.get(h) for h in hours]
-        wp = [max(0.0, wp_d.get(h, 0.0)) for h in hours]
 
-        res = sim.simulate(hours, imp, exp, ev, soc, spot, o, TZ, wp=wp)
+        res = sim.simulate(hours, imp, exp, ev, soc, spot, o, TZ, wp=wp, wp_pmax=wp_pmax, pv=pv)
         rows = res["rows"]
         self.result = res
         self.daily = sim.aggregate(rows, TZ, "day")
         self.monthly = sim.aggregate(rows, TZ, "month")
         self.profile = sim.hour_profile(rows, TZ)
-        self.summary = self._summary(res, hours)
+        self.summary = self._summary(res, bool(pv_ids))
+        s = self.summary
         _LOG.info(
-            "Rechenlauf: %d h, fix %.2f €, dyn %.2f €, dyn+opt %.2f €",
-            len(rows), self.summary["fix"], self.summary["dyn"], self.summary["dyn_opt"],
+            "Rechenlauf: %d h, fix %.2f €, dyn %.2f €, Effekte E-Auto %.2f / WP %.2f / Akku %.2f / alle %.2f €",
+            len(rows), s["fix"], s["dyn"], s["effekt_ev"], s["effekt_wp"], s["effekt_akku"], s["effekt_alle"],
         )
+        await self._cleanup_obsolete()
         await self._publish_states()
         await self._import_statistics(rows)
 
-    def _summary(self, res: dict, hours: list[int]) -> dict:
+    def _summary(self, res: dict, has_pv: bool) -> dict:
         rows = res["rows"]
         tot = {k: sum(r[k] for r in rows) for k in sim.SUM_KEYS}
         pw = sum(r["imp"] * r["p"] for r in rows)
-        pw_opt = sum(r["opt"] * r["p"] for r in rows)
+        pw_all = sum(r["imp_all"] * r["p"] for r in rows)
         pw_wp = sum(r["wp_grid"] * r["p"] for r in rows)
         pw_wp_new = sum(r["wp_grid_new"] * r["p"] for r in rows)
         month_key = dt.datetime.now(TZ).strftime("%Y-%m")
@@ -145,13 +176,15 @@ class Engine:
             "bis": dt.datetime.fromtimestamp(rows[-1]["t"] + 3600, TZ).isoformat() if rows else None,
             "stunden": len(rows),
             "stunden_ohne_preis": res["missing_hours"],
+            "vorhanden": res["vorhanden"],
             "ersparnis": tot["fix"] - tot["dyn"],
-            "ersparnis_opt": tot["fix"] - tot["dyn_opt"],
-            "preis_gewichtet_ct": pw / tot["imp"] if tot["imp"] > 0 else None,
-            "preis_gewichtet_opt_ct": pw_opt / tot["opt"] if tot["opt"] > 0 else None,
-            "ersparnis_wp": tot["fix"] - tot["dyn_wp"],
             "ersparnis_alle": tot["fix"] - tot["dyn_all"],
-            "wp_effekt": tot["dyn"] - tot["dyn_wp"],
+            "effekt_ev": tot["dyn"] - tot["dyn_ev"],
+            "effekt_wp": tot["dyn"] - tot["dyn_wp"],
+            "effekt_akku": tot["dyn"] - tot["dyn_bat"],
+            "effekt_alle": tot["dyn"] - tot["dyn_all"],
+            "preis_gewichtet_ct": pw / tot["imp"] if tot["imp"] > 0 else None,
+            "preis_gewichtet_alle_ct": pw_all / tot["imp_all"] if tot["imp_all"] > 0 else None,
             "preis_wp_ct": pw_wp / tot["wp_grid"] if tot["wp_grid"] > 0 else None,
             "preis_wp_neu_ct": pw_wp_new / tot["wp_grid_new"] if tot["wp_grid_new"] > 0 else None,
             "monat": cur,
@@ -159,6 +192,7 @@ class Engine:
             "akku": res["akku"],
             "wp": res["wp"],
             "alle": res["alle"],
+            "pv_arm": sim.pv_poor_days(self.daily, float(self.opts.get("pv_wenig_kwh_tag", 5.0))) if has_pv else None,
         }
 
     # ------------------------------------------------------------------ Ausgabe an HA
@@ -171,51 +205,57 @@ class Engine:
             for h, p in sorted(data.items())
         ]
 
+    async def _cleanup_obsolete(self) -> None:
+        state = _read_state()
+        if state.get("cleanup_v030"):
+            return
+        for eid in OBSOLETE_STATES:
+            await self.ha.delete_state(eid)
+        try:
+            await self.ha.clear_statistics(OBSOLETE_STATS)
+        except HAError as err:
+            _LOG.warning("Alte Statistiken konnten nicht entfernt werden: %s", err)
+        state["cleanup_v030"] = True
+        _write_state(state)
+
     async def _publish_states(self) -> None:
         s = self.summary
+        have = s["vorhanden"]
         common = {"zeitraum_von": s["von"], "zeitraum_bis": s["bis"], "netzbezug_kwh": round(s["imp"], 2)}
 
-        def money(name: str, value: float, icon: str, extra: dict | None = None) -> dict:
-            return {
-                "friendly_name": name, "unit_of_measurement": "EUR", "device_class": "monetary",
-                "icon": icon, **common, **(extra or {}),
-            }
+        def money(name: str, icon: str, extra: dict | None = None) -> dict:
+            return {"friendly_name": name, "unit_of_measurement": "EUR", "device_class": "monetary",
+                    "icon": icon, **common, **(extra or {})}
+
+        effects = {}
+        if have["ev"]:
+            effects["effekt_e_auto"] = round(s["effekt_ev"], 2)
+        if have["wp"]:
+            effects["effekt_waermepumpe"] = round(s["effekt_wp"], 2)
+        if have["akku"]:
+            effects["effekt_hausakku"] = round(s["effekt_akku"], 2)
 
         await self.ha.set_state("sensor.tarifvergleich_kosten_festpreis", round(s["fix"], 2),
-                                money("Tarifvergleich Kosten Festpreis", s["fix"], "mdi:cash-lock"))
+                                money("Tarifvergleich Kosten Festpreis", "mdi:cash-lock"))
         await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch", round(s["dyn"], 2),
-                                money("Tarifvergleich Kosten dynamisch", s["dyn"], "mdi:cash-clock",
+                                money("Tarifvergleich Kosten dynamisch", "mdi:cash-clock",
                                       {"preis_gewichtet_ct": _r(s["preis_gewichtet_ct"])}))
-        await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_optimiert", round(s["dyn_opt"], 2),
-                                money("Tarifvergleich Kosten dynamisch + Verschiebung", s["dyn_opt"], "mdi:cash-fast",
-                                      {"preis_gewichtet_ct": _r(s["preis_gewichtet_opt_ct"]),
-                                       "ev_kwh_verschoben": _r(s["ev"]["kwh_verschoben"]),
-                                       "akku_kwh_netzladung": _r(s["akku"]["kwh_netzladung"])}))
         await self.ha.set_state("sensor.tarifvergleich_ersparnis", round(s["ersparnis"], 2),
-                                money("Tarifvergleich Ersparnis dynamisch", s["ersparnis"], "mdi:piggy-bank"))
-        await self.ha.set_state("sensor.tarifvergleich_ersparnis_optimiert", round(s["ersparnis_opt"], 2),
-                                money("Tarifvergleich Ersparnis dynamisch + Verschiebung", s["ersparnis_opt"],
-                                      "mdi:piggy-bank-outline"))
-        if self.opts.get("wp_verschiebung"):
-            await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_wp", round(s["dyn_wp"], 2),
-                                    money("Tarifvergleich Kosten dynamisch + WP-Verschiebung", 0, "mdi:heat-pump",
-                                          {"wp_netzbezug_kwh": _r(s["wp_grid"]),
-                                           "wp_kwh_verschoben": _r(s["wp"]["kwh_verschoben"]),
-                                           "wp_preis_ct": _r(s["preis_wp_ct"]),
-                                           "wp_preis_verschoben_ct": _r(s["preis_wp_neu_ct"])}))
-            await self.ha.set_state("sensor.tarifvergleich_ersparnis_wp", round(s["wp_effekt"], 2),
-                                    money("Tarifvergleich Ersparnis durch WP-Verschiebung", 0, "mdi:heat-pump-outline",
-                                          {"ersparnis_ggue_festpreis": round(s["ersparnis_wp"], 2)}))
-            await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_alle", round(s["dyn_all"], 2),
-                                    money("Tarifvergleich Kosten dynamisch + alle Maßnahmen", 0, "mdi:cash-check",
-                                          {"ersparnis_ggue_festpreis": round(s["ersparnis_alle"], 2)}))
+                                money("Tarifvergleich Ersparnis dynamisch", "mdi:piggy-bank"))
+        if any(have.values()):
+            await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_optimiert", round(s["dyn_all"], 2),
+                                    money("Tarifvergleich Kosten dynamisch + Lastverschiebung", "mdi:cash-fast",
+                                          {"preis_gewichtet_ct": _r(s["preis_gewichtet_alle_ct"]), **effects}))
+            await self.ha.set_state("sensor.tarifvergleich_ersparnis_optimiert", round(s["ersparnis_alle"], 2),
+                                    money("Tarifvergleich Ersparnis dynamisch + Lastverschiebung",
+                                          "mdi:piggy-bank-outline", effects))
         m = s.get("monat")
         if m:
             await self.ha.set_state("sensor.tarifvergleich_ersparnis_monat", round(m["fix"] - m["dyn"], 2),
-                                    money("Tarifvergleich Ersparnis laufender Monat", 0, "mdi:calendar-month",
+                                    money("Tarifvergleich Ersparnis laufender Monat", "mdi:calendar-month",
                                           {"monat": m["key"], "kosten_festpreis": round(m["fix"], 2),
                                            "kosten_dynamisch": round(m["dyn"], 2),
-                                           "kosten_dynamisch_optimiert": round(m["dyn_opt"], 2)}))
+                                           "kosten_dynamisch_lastverschiebung": round(m["dyn_all"], 2)}))
 
         fut = self.future_prices()
         now_h = int(dt.datetime.now(dt.timezone.utc).timestamp()) // 3600 * 3600
@@ -245,15 +285,14 @@ class Engine:
         if not rows:
             return
         sig = self._signature()
-        state = {}
-        try:
-            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError):
-            pass
+        state = _read_state()
         full = state.get("signature") != sig or state.get("first_t") != rows[0]["t"]
         cutoff = rows[-1]["t"] - 72 * 3600 if not full else -1
 
-        for key, (sid, name) in STAT_IDS.items():
+        keys = dict(STAT_IDS)
+        if not any(self.summary["vorhanden"].values()):
+            keys.pop("dyn_all")
+        for key, (sid, name) in keys.items():
             cum = 0.0
             stats = []
             for r in rows:
@@ -270,12 +309,9 @@ class Engine:
                 "statistic_id": PRICE_STAT[0], "unit_of_measurement": "ct/kWh", "unit_class": None}
         await self.ha.import_statistics(meta, stats)
 
-        STATE_FILE.write_text(json.dumps({"signature": sig, "first_t": rows[0]["t"]}), encoding="utf-8")
+        state.update(signature=sig, first_t=rows[0]["t"])
+        _write_state(state)
         _LOG.info("Statistiken importiert (%s)", "vollständig" if full else "letzte 72 h")
-
-
-def _r(v, nd: int = 2):
-    return round(v, nd) if isinstance(v, (int, float)) else v
 
 
 # --------------------------------------------------------------------------- Web

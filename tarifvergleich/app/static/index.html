@@ -8,17 +8,20 @@
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #1d2430; --muted: #6b7686; --line: #e3e7ee;
-    --fix: #8a94a6; --dyn: #2f6fde; --opt: #1f9d6b; --wp: #c0569a; --all: #7a5bd6; --price: #d9822b; --bad: #c8453b;
+    --fix: #8a94a6; --dyn: #2f6fde; --ev: #1f9d6b; --wp: #c0569a; --ww: #e8a3cf; --bat: #d9a21b; --all: #7a5bd6;
+    --price: #d9822b; --bad: #c8453b; --good: #1f9d6b;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #111418; --card: #1a1f26; --text: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
-      --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --wp: #e07bbd; --all: #a08af0; --price: #f0a050; --bad: #f07067;
+      --fix: #9aa4b2; --dyn: #5b8ff0; --ev: #34c48b; --wp: #e07bbd; --ww: #f2bde0; --bat: #f0c040; --all: #a08af0;
+      --price: #f0a050; --bad: #f07067; --good: #34c48b;
     }
   }
   :root[data-theme="dark"] {
     --bg: #111418; --card: #1a1f26; --text: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
-    --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --wp: #e07bbd; --all: #a08af0; --price: #f0a050; --bad: #f07067;
+    --fix: #9aa4b2; --dyn: #5b8ff0; --ev: #34c48b; --wp: #e07bbd; --ww: #f2bde0; --bat: #f0c040; --all: #a08af0;
+    --price: #f0a050; --bad: #f07067; --good: #34c48b;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -27,20 +30,23 @@
   header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
   h1 { font-size: 22px; margin: 0; }
   h2 { font-size: 15px; margin: 0 0 12px; }
+  h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .muted { color: var(--muted); }
   nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
   nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
                padding: 8px 14px; color: var(--muted); font-weight: 600; }
   nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--dyn); }
-  .view[hidden] { display: none; }
+  [hidden] { display: none !important; }
   .grid { display: grid; gap: 12px; }
   .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 12px; }
   .two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .three { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
-  .kpi .label { font-size: 12px; color: var(--muted); }
+  .kpi .label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .pos { color: var(--opt); } .neg { color: var(--bad); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .pos { color: var(--good); } .neg { color: var(--bad); }
   .chart { position: relative; height: 280px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -55,7 +61,7 @@
   dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-variant-numeric: tabular-nums; }
   dt { color: var(--muted); } dd { margin: 0; text-align: right; }
   .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
-  .intro { margin: 0 0 12px; color: var(--muted); max-width: 80ch; }
+  .intro { margin: 0 0 12px; color: var(--muted); max-width: 85ch; }
   section { margin-top: 12px; }
 </style>
 </head>
@@ -71,7 +77,7 @@
 
   <nav role="tablist">
     <button role="tab" data-view="overview" aria-selected="true">Übersicht</button>
-    <button role="tab" data-view="wp" aria-selected="false">Wärmepumpe</button>
+    <button role="tab" data-view="shift" aria-selected="false" id="tabShift" hidden>Lastverschiebung</button>
   </nav>
 
   <div id="error" class="card err" hidden></div>
@@ -102,52 +108,43 @@
       <div class="scroll"><table id="tMonthly"></table></div>
     </section>
 
-    <section class="grid two">
-      <div class="card"><h2>Preisformel dynamisch</h2><dl id="formula"></dl>
-        <div class="note">Endpreis = (Börsenpreis + Aufschläge netto) × MwSt. Grundpreise werden stündlich anteilig verrechnet.</div></div>
-      <div class="card"><h2>Lastverschiebung E-Auto &amp; Akku (Szenario)</h2><dl id="shift"></dl>
-        <div class="note">E-Auto: Netzbezug abendlicher/nächtlicher Ladevorgänge wird in die günstigsten Stunden bis zur Fertig-Uhrzeit gelegt.
-          Akku: lädt in günstigen Stunden aus dem Netz, wenn der reale Ladestand Platz lässt, und ersetzt späteren teuren Bezug.
-          Es wird mit bekannten Day-Ahead-Preisen gerechnet – das ist eine Obergrenze dessen, was eine Steuerung wie evcc erreichen kann.
-          Die Wärmepumpe ist hier <b>nicht</b> enthalten, siehe eigener Reiter.</div></div>
+    <section class="card">
+      <h2>Preisformel dynamisch</h2><dl id="formula"></dl>
+      <div class="note">Endpreis = (Börsenpreis + Aufschläge netto) × MwSt. Grundpreise werden stündlich anteilig verrechnet.
+        Diese Ansicht zeigt den Verbrauch <b>wie gemessen</b> – Lastverschiebung siehe eigener Reiter.</div>
     </section>
   </div>
 
-  <!-- ===================================================== Wärmepumpe -->
-  <div class="view" id="view-wp" hidden>
-    <p class="intro" id="wpIntro"></p>
-    <div class="grid kpis" id="wpKpis"></div>
+  <!-- ===================================================== Lastverschiebung -->
+  <div class="view" id="view-shift" hidden>
+    <p class="intro">Was wäre mit dem dynamischen Tarif drin, wenn Verbraucher gezielt in günstige Stunden gelegt werden?
+      Jede Maßnahme wird <b>einzeln</b> gegen „Dynamisch wie gemessen“ gerechnet, „Alle Maßnahmen“ kombiniert sie.
+      Gerechnet wird mit bekannten Day-Ahead-Preisen – eine Obergrenze dessen, was eine Steuerung wie evcc erreicht.</p>
+    <div class="grid kpis" id="shiftKpis"></div>
 
     <section class="grid two">
-      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cWpMonthly"></canvas></div></div>
-      <div class="card"><h2>WP-Netzbezug und Ersparnis durch Verschiebung je Monat</h2><div class="chart"><canvas id="cWpEffect"></canvas></div></div>
+      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cShiftMonthly"></canvas></div></div>
+      <div class="card"><h2>Ersparnis je Monat nach Maßnahme</h2><div class="chart"><canvas id="cShiftEffect"></canvas></div></div>
     </section>
 
     <section class="card">
-      <h2>Tagesprofil: Ø WP-Netzbezug je Stunde – original vs. verschoben</h2>
-      <div class="chart"><canvas id="cWpProfile"></canvas></div>
+      <h2>Tagesprofil: Ø Netzbezug je Stunde – wie gemessen vs. alle Maßnahmen</h2>
+      <div class="chart"><canvas id="cShiftProfile"></canvas></div>
     </section>
 
     <section class="card">
-      <div class="row"><h2 style="margin:0">Tagesdetail Wärmepumpe</h2>
+      <div class="row"><h2 style="margin:0">Tagesdetail</h2>
         <span><button data-shift="-1">‹</button> <input type="date" class="day"> <button data-shift="1">›</button></span></div>
-      <div class="chart"><canvas id="cWpDay"></canvas></div>
-      <div class="note" id="wpDayNote"></div>
+      <div class="chart"><canvas id="cShiftDay"></canvas></div>
+      <div class="note" id="shiftDayNote"></div>
     </section>
 
     <section class="card">
-      <h2>Monatsübersicht Wärmepumpe</h2>
-      <div class="scroll"><table id="tWpMonthly"></table></div>
+      <h2>Monatsübersicht Lastverschiebung</h2>
+      <div class="scroll"><table id="tShift"></table></div>
     </section>
 
-    <section class="card">
-      <h2>Modell &amp; Annahmen</h2><dl id="wpParams"></dl>
-      <div class="note">Je Stunde darf der eingestellte Anteil des WP-Netzbezugs innerhalb des Fensters in billigere Stunden
-        wandern (Vorheizen über Estrich/Puffer oder kurz nachlaufen lassen). Verschobene Energie kostet einen Mehrverbrauch,
-        weil höhere Vorlauftemperaturen die Effizienz senken. Teuerste Stunden werden zuerst entlastet, die WP-Höchstleistung
-        begrenzt die Zielstunden. Als WP-Netzanteil zählt der WP-Verbrauch, soweit in der Stunde Netzbezug da war.
-        „Alle Maßnahmen“ kombiniert WP-Verschiebung mit E-Auto und Akku aus der Übersicht.</div>
-    </section>
+    <section class="grid three" id="measureCards"></section>
   </div>
 </main>
 
@@ -159,9 +156,18 @@ const num = (v, d = 1) => v == null ? "–" : v.toLocaleString("de-DE", { maximu
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const monthName = k => { const [y, m] = k.split("-"); return new Date(+y, +m - 1, 1).toLocaleDateString("de-DE", { month: "short", year: "2-digit" }); };
 const sign = v => v >= 0 ? "pos" : "neg";
+const pct = (a, b) => b ? `${num(a / b * 100, 1)} %` : "";
 const charts = {};
 let DATA = null, VIEW = "overview";
 try { VIEW = localStorage.getItem("tv-view") || "overview"; } catch (e) {}
+
+// Maßnahmen: Schlüssel im Summary/Monat, Farbe, Bezeichnung
+const MEASURES = [
+  { id: "ev", cost: "dyn_ev", eff: "effekt_ev", color: "--ev", label: "E-Auto" },
+  { id: "wp", cost: "dyn_wp", eff: "effekt_wp", color: "--wp", label: "Wärmepumpe" },
+  { id: "akku", cost: "dyn_bat", eff: "effekt_akku", color: "--bat", label: "Hausakku" },
+];
+const present = d => MEASURES.filter(m => d.summary.vorhanden && d.summary.vorhanden[m.id]);
 
 function chart(id, cfg) {
   if (charts[id]) charts[id].destroy();
@@ -174,32 +180,26 @@ function chart(id, cfg) {
   charts[id] = new Chart(document.getElementById(id), cfg);
 }
 const eurTip = { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${eur(c.parsed.y)}` } } };
-const eurAxis = { ticks: { callback: v => v + " €" } };
+const eurAxis = () => ({ ticks: { callback: v => v + " €" } });
 const kwhAxis = () => ({ title: { display: true, text: "kWh", color: css("--muted") } });
-const ctAxis = { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " ct" } };
+const ctAxis = () => ({ position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " ct" } });
 
-function kpi(label, value, sub, cls) {
-  return `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls || ""}">${value}</div><div class="sub">${sub || ""}</div></div>`;
+function kpi(label, value, sub, cls, color) {
+  const dot = color ? `<span class="dot" style="background:${css(color)}"></span>` : "";
+  return `<div class="card kpi"><div class="label">${dot}${label}</div><div class="value ${cls || ""}">${value}</div><div class="sub">${sub || ""}</div></div>`;
 }
-const pct = (a, b) => b ? `${num(a / b * 100, 1)} %` : "";
 
 // ------------------------------------------------------------------ Tabs
 function showView(v) {
+  if (v === "shift" && DATA && !present(DATA).length) v = "overview";
   VIEW = v;
   try { localStorage.setItem("tv-view", v); } catch (e) {}
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
   document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
-  if (DATA) renderView();
+  if (DATA && DATA.summary && DATA.summary.stunden) { (v === "shift" ? renderShift : renderOverview)(DATA); loadDay(); }
 }
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
 
-function renderView() {
-  if (!DATA.summary || !DATA.summary.stunden) return;
-  if (VIEW === "wp") renderWp(DATA); else renderOverview(DATA);
-  loadDay();
-}
-
-// ------------------------------------------------------------------ Gemeinsam
 function render(d) {
   DATA = d;
   const s = d.summary || {};
@@ -210,6 +210,7 @@ function render(d) {
   document.getElementById("period").textContent =
     `${new Date(s.von).toLocaleDateString("de-DE")} – ${new Date(s.bis).toLocaleDateString("de-DE")} · ${num(s.stunden / 24, 0)} Tage` +
     (s.stunden_ohne_preis ? ` · ${s.stunden_ohne_preis} h ohne Preis` : "");
+  document.getElementById("tabShift").hidden = !present(d).length;
   const D = d.daily;
   document.querySelectorAll("input.day").forEach(el => {
     if (!el.value && D.length) { el.min = D[0].key; el.max = D[D.length - 1].key; el.value = D[D.length - 1].key; }
@@ -219,46 +220,42 @@ function render(d) {
 
 // ------------------------------------------------------------------ Übersicht
 function renderOverview(d) {
-  const s = d.summary, t = d.tarif, M = d.monthly, D = d.daily;
+  const s = d.summary, t = d.tarif, M = d.monthly, D = d.daily, has = present(d).length > 0;
   document.getElementById("kpis").innerHTML =
-    kpi("Festpreis", eur(s.fix), `${ct(t.fix_ct_brutto)}/kWh · ${kwh(s.imp)}`) +
-    kpi("Dynamisch", eur(s.dyn), `Ø ${ct(s.preis_gewichtet_ct)}/kWh`) +
+    kpi("Festpreis", eur(s.fix), `${ct(t.fix_ct_brutto)}/kWh · ${kwh(s.imp)}`, "", "--fix") +
+    kpi("Dynamisch", eur(s.dyn), `Ø ${ct(s.preis_gewichtet_ct)}/kWh`, "", "--dyn") +
     kpi("Ersparnis dynamisch", eur(s.ersparnis), pct(s.ersparnis, s.fix), sign(s.ersparnis)) +
-    kpi("Dyn. + E-Auto/Akku", eur(s.dyn_opt), `Ø ${ct(s.preis_gewichtet_opt_ct)}/kWh`) +
-    kpi("Ersparnis mit E-Auto/Akku", eur(s.ersparnis_opt), pct(s.ersparnis_opt, s.fix), sign(s.ersparnis_opt)) +
+    (has ? kpi("Mit Lastverschiebung", eur(s.ersparnis_alle), `ggü. Festpreis · Details im Reiter „Lastverschiebung“`, sign(s.ersparnis_alle), "--all") : "") +
     kpi("Einspeisung", eur(s.feed), `${kwh(s.exp)} · in beiden Tarifen gleich`);
 
   chart("cMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
     { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
-    { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
-    { label: "Dyn. + E-Auto/Akku", data: M.map(m => m.dyn_opt), backgroundColor: css("--opt") } ] },
-    options: { scales: { x: {}, y: eurAxis }, plugins: eurTip } });
+    { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") } ] },
+    options: { scales: { x: {}, y: eurAxis() }, plugins: eurTip } });
 
   let a = 0, b = 0;
-  chart("cCum", { type: "line", data: { labels: D.map(x => new Date(x.key).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })), datasets: [
-    { label: "Dynamisch", data: D.map(x => (a += x.fix - x.dyn)), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2 },
-    { label: "Dyn. + E-Auto/Akku", data: D.map(x => (b += x.fix - x.dyn_opt)), borderColor: css("--opt"), pointRadius: 0, borderWidth: 2 } ] },
-    options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: eurAxis }, plugins: eurTip } });
+  const cum = [{ label: "Dynamisch", data: D.map(x => (a += x.fix - x.dyn)), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2 }];
+  if (has) cum.push({ label: "Mit Lastverschiebung", data: D.map(x => (b += x.fix - x.dyn_all)), borderColor: css("--all"), pointRadius: 0, borderWidth: 2, borderDash: [5, 3] });
+  chart("cCum", { type: "line", data: { labels: D.map(x => new Date(x.key).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })), datasets: cum },
+    options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: eurAxis() }, plugins: eurTip } });
 
   const F = d.future, nowH = Math.floor(Date.now() / 3600000) * 3600;
   chart("cFuture", { type: "bar", data: { labels: F.map(p => new Date(p.start).toLocaleString("de-DE", { weekday: "short", hour: "2-digit" })), datasets: [
     { label: "Dynamisch (ct/kWh)", data: F.map(p => p.preis_ct),
-      backgroundColor: F.map(p => p.t === nowH ? css("--price") : (p.preis_ct < t.fix_ct_brutto ? css("--opt") : css("--bad"))) },
+      backgroundColor: F.map(p => p.t === nowH ? css("--price") : (p.preis_ct < t.fix_ct_brutto ? css("--good") : css("--bad"))) },
     { type: "line", label: "Festpreis", data: F.map(() => t.fix_ct_brutto), borderColor: css("--fix"), borderDash: [4, 4], pointRadius: 0, borderWidth: 1.5 } ] },
     options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { ticks: { callback: v => v + " ct" } } } } });
 
   const P = d.profile;
   chart("cProfile", { type: "bar", data: { labels: P.map(p => p.h + " Uhr"), datasets: [
     { type: "line", label: "Ø Preis (ct/kWh)", data: P.map(p => p.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 },
-    { label: "Ø Bezug (kWh)", data: P.map(p => p.imp), backgroundColor: css("--dyn") },
-    { label: "Ø Bezug E-Auto/Akku (kWh)", data: P.map(p => p.opt), backgroundColor: css("--opt") } ] },
-    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis } } });
+    { label: "Ø Netzbezug (kWh)", data: P.map(p => p.imp), backgroundColor: css("--dyn") } ] },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis() } } });
 
-  document.getElementById("tMonthly").innerHTML = `<tr><th>Monat</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th><th>Dyn.+E-Auto/Akku</th><th>Δ</th></tr>` +
+  document.getElementById("tMonthly").innerHTML = `<tr><th>Monat</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th></tr>` +
     M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.imp)}</td><td>${ct(m.spot_mittel_ct)}</td><td>${ct(m.preis_gewichtet_ct)}</td>
-      <td>${eur(m.fix)}</td><td>${eur(m.dyn)}</td><td class="${sign(m.fix - m.dyn)}">${eur(m.fix - m.dyn)}</td>
-      <td>${eur(m.dyn_opt)}</td><td class="${sign(m.fix - m.dyn_opt)}">${eur(m.fix - m.dyn_opt)}</td></tr>`).join("") +
-    `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th></th><th>${ct(s.preis_gewichtet_ct)}</th><th>${eur(s.fix)}</th><th>${eur(s.dyn)}</th><th>${eur(s.ersparnis)}</th><th>${eur(s.dyn_opt)}</th><th>${eur(s.ersparnis_opt)}</th></tr>`;
+      <td>${eur(m.fix)}</td><td>${eur(m.dyn)}</td><td class="${sign(m.fix - m.dyn)}">${eur(m.fix - m.dyn)}</td></tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th></th><th>${ct(s.preis_gewichtet_ct)}</th><th>${eur(s.fix)}</th><th>${eur(s.dyn)}</th><th>${eur(s.ersparnis)}</th></tr>`;
 
   const f = Object.entries(t.aufschlaege_ct_netto).map(([k, v]) => `<dt>${k}</dt><dd>${num(v, 3)} ct netto</dd>`).join("");
   document.getElementById("formula").innerHTML = `<dt>Börsenpreis Day-Ahead (DE-LU)</dt><dd>variabel</dd>${f}
@@ -266,71 +263,85 @@ function renderOverview(d) {
     <dt>Break-even Börsenpreis (netto) ggü. ${ct(t.fix_ct_brutto)}</dt><dd>${ct(t.break_even_spot_ct)}</dd>
     ${Object.entries(t.dyn_grundpreis_teile).map(([k, v]) => `<dt>${k}</dt><dd>${eur(v)}/Jahr</dd>`).join("")}
     <dt><b>Grundpreise dynamisch / fix</b></dt><dd><b>${eur(t.dyn_grundpreis_eur_jahr)} / ${eur(t.fix_grundpreis_eur_jahr)}</b></dd>`;
-
-  const o = d.optionen, ev = s.ev, ak = s.akku;
-  document.getElementById("shift").innerHTML = `
-    <dt>E-Auto: verschobene Ladevorgänge</dt><dd>${o.ev_verschiebung ? ev.sitzungen : "aus"}</dd>
-    <dt>E-Auto: verschobene Energie</dt><dd>${kwh(ev.kwh_verschoben)}</dd>
-    <dt>E-Auto: Ersparnis durch Verschiebung</dt><dd>${eur(ev.ersparnis_eur)}</dd>
-    <dt>Fenster</dt><dd>ab ${o.ev_abend_ab_uhr}:00 bis ${o.ev_fertig_bis_uhr}:00, max ${num(o.ev_max_kw)} kW</dd>
-    <dt>Akku: Netzladung</dt><dd>${o.akku_arbitrage ? kwh(ak.kwh_netzladung) : "aus"}</dd>
-    <dt>Akku: zusätzliche Vollzyklen</dt><dd>${num(ak.vollzyklen, 1)}</dd>
-    <dt>Akku: Ersparnis durch Arbitrage</dt><dd>${eur(ak.ersparnis_eur)}</dd>
-    <dt>Parameter</dt><dd>${num(o.akku_kapazitaet_kwh)} kWh, ${num(o.akku_max_netzladeleistung_kw)} kW, η ${num(o.akku_wirkungsgrad, 2)}, Spread ≥ ${num(o.akku_mindest_spread_ct)} ct</dd>`;
 }
 
-// ------------------------------------------------------------------ Wärmepumpe
-function renderWp(d) {
-  const s = d.summary, o = d.optionen, M = d.monthly, w = s.wp;
-  const intro = document.getElementById("wpIntro");
-  if (!o.wp_verschiebung) {
-    intro.textContent = "Das Szenario Wärmepumpen-Verschiebung ist in der App-Konfiguration ausgeschaltet.";
-    document.getElementById("wpKpis").innerHTML = ""; return;
-  }
-  intro.textContent = `Separates Szenario: nur die Wärmepumpe wird verschoben (bis ${num(o.wp_anteil_verschiebbar * 100, 0)} % je Stunde, ±${o.wp_fenster_h} h), ` +
-    `alles andere bleibt wie gemessen. Vergleichsbasis ist „Dynamisch“ ohne Maßnahmen.`;
+// ------------------------------------------------------------------ Lastverschiebung
+function renderShift(d) {
+  const s = d.summary, o = d.optionen, M = d.monthly, P = d.profile, ms = present(d);
+  const w = s.wp, ak = s.akku, ev = s.ev, pa = s.pv_arm;
 
-  document.getElementById("wpKpis").innerHTML =
-    kpi("WP-Netzbezug", kwh(s.wp_grid), `${pct(s.wp_grid, s.imp)} des gesamten Netzbezugs`) +
-    kpi("Ø Preis WP-Strom", ct(s.preis_wp_ct), `verschoben: ${ct(s.preis_wp_neu_ct)}`) +
-    kpi("Verschobene Energie", kwh(w.kwh_verschoben), `+${kwh(w.kwh_mehrverbrauch)} Mehrverbrauch`) +
-    kpi("Ersparnis durch WP-Verschiebung", eur(s.wp_effekt), "gegenüber dynamisch ohne Maßnahmen", sign(s.wp_effekt)) +
-    kpi("Dyn. + WP vs. Festpreis", eur(s.ersparnis_wp), `Kosten ${eur(s.dyn_wp)} statt ${eur(s.fix)}`, sign(s.ersparnis_wp)) +
-    kpi("Alle Maßnahmen vs. Festpreis", eur(s.ersparnis_alle), `WP + E-Auto + Akku · Kosten ${eur(s.dyn_all)}`, sign(s.ersparnis_alle));
+  const subs = {
+    ev: `${kwh(ev.kwh_verschoben)} verschoben · ${ev.sitzungen} Ladevorgänge`,
+    wp: `Heizung ${eur(w.heizung.ersparnis_eur)} · Warmwasser ${eur(w.warmwasser.ersparnis_eur)}`,
+    akku: `${kwh(ak.kwh_netzladung)} Netzladung · ${num(ak.vollzyklen, 0)} Zyklen`,
+  };
+  document.getElementById("shiftKpis").innerHTML =
+    ms.map(m => kpi(m.label, eur(s[m.eff]), subs[m.id], sign(s[m.eff]), m.color)).join("") +
+    kpi("Alle Maßnahmen", eur(s.effekt_alle), `ggü. dynamisch wie gemessen · Ø ${ct(s.preis_gewichtet_alle_ct)}/kWh`, sign(s.effekt_alle), "--all") +
+    kpi("Alle Maßnahmen vs. Festpreis", eur(s.ersparnis_alle), `Kosten ${eur(s.dyn_all)} statt ${eur(s.fix)}`, sign(s.ersparnis_alle));
 
-  chart("cWpMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+  chart("cShiftMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
     { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
-    { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
-    { label: "Dyn. + WP-Verschiebung", data: M.map(m => m.dyn_wp), backgroundColor: css("--wp") },
-    { label: "Alle Maßnahmen", data: M.map(m => m.dyn_all), backgroundColor: css("--all") } ] },
-    options: { scales: { x: {}, y: eurAxis }, plugins: eurTip } });
+    { label: "Dynamisch wie gemessen", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
+    { label: "Dynamisch + alle Maßnahmen", data: M.map(m => m.dyn_all), backgroundColor: css("--all") } ] },
+    options: { scales: { x: {}, y: eurAxis() }, plugins: eurTip } });
 
-  chart("cWpEffect", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
-    { type: "line", label: "Ersparnis durch Verschiebung (€)", data: M.map(m => m.dyn - m.dyn_wp), borderColor: css("--opt"), yAxisID: "y1", pointRadius: 3, borderWidth: 2 },
-    { label: "WP-Netzbezug (kWh)", data: M.map(m => m.wp_grid), backgroundColor: css("--wp") } ] },
-    options: { scales: { x: {}, y: kwhAxis(), y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " €" } } } } });
+  chart("cShiftEffect", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets:
+    ms.map(m => ({ label: m.label, data: M.map(x => x.dyn - x[m.cost]), backgroundColor: css(m.color), stack: "e" })).concat(
+    [{ type: "line", label: "Alle kombiniert", data: M.map(x => x.dyn - x.dyn_all), borderColor: css("--all"), pointRadius: 3, borderWidth: 2 }]) },
+    options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
 
-  const P = d.profile;
-  chart("cWpProfile", { type: "bar", data: { labels: P.map(p => p.h + " Uhr"), datasets: [
+  const prof = [
     { type: "line", label: "Ø Preis (ct/kWh)", data: P.map(p => p.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 },
-    { label: "Ø WP-Netzbezug original (kWh)", data: P.map(p => p.wp_grid), backgroundColor: css("--fix") },
-    { label: "Ø WP-Netzbezug verschoben (kWh)", data: P.map(p => p.wp_grid_new), backgroundColor: css("--wp") } ] },
-    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis } } });
+    { label: "Ø Netzbezug wie gemessen", data: P.map(p => p.imp), backgroundColor: css("--fix") },
+    { label: "Ø Netzbezug alle Maßnahmen", data: P.map(p => p.imp_all), backgroundColor: css("--all") }];
+  if (s.vorhanden.wp) prof.push({ type: "line", label: "Ø WP-Netzbezug verschoben", data: P.map(p => p.wp_grid_new), borderColor: css("--wp"), pointRadius: 0, borderWidth: 1.5, borderDash: [4, 3] });
+  chart("cShiftProfile", { type: "bar", data: { labels: P.map(p => p.h + " Uhr"), datasets: prof },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis() } } });
 
-  const tot = k => M.reduce((a, m) => a + m[k], 0);
-  document.getElementById("tWpMonthly").innerHTML = `<tr><th>Monat</th><th>WP-Netzbezug</th><th>Ø Preis WP</th><th>Dynamisch</th><th>Dyn.+WP</th><th>Δ durch WP</th><th>Festpreis</th><th>Dyn.+WP ggü. fix</th><th>Alle Maßnahmen</th><th>ggü. fix</th></tr>` +
-    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.wp_grid)}</td><td>${ct(m.preis_wp_ct)}</td>
-      <td>${eur(m.dyn)}</td><td>${eur(m.dyn_wp)}</td><td class="${sign(m.dyn - m.dyn_wp)}">${eur(m.dyn - m.dyn_wp)}</td>
-      <td>${eur(m.fix)}</td><td class="${sign(m.fix - m.dyn_wp)}">${eur(m.fix - m.dyn_wp)}</td>
-      <td>${eur(m.dyn_all)}</td><td class="${sign(m.fix - m.dyn_all)}">${eur(m.fix - m.dyn_all)}</td></tr>`).join("") +
-    `<tr><th>Summe</th><th>${kwh(tot("wp_grid"))}</th><th>${ct(s.preis_wp_ct)}</th><th>${eur(s.dyn)}</th><th>${eur(s.dyn_wp)}</th><th>${eur(s.wp_effekt)}</th><th>${eur(s.fix)}</th><th>${eur(s.ersparnis_wp)}</th><th>${eur(s.dyn_all)}</th><th>${eur(s.ersparnis_alle)}</th></tr>`;
+  document.getElementById("tShift").innerHTML =
+    `<tr><th>Monat</th><th>Bezug</th><th>Dynamisch</th>${ms.map(m => `<th>${m.label}</th>`).join("")}<th>Alle</th><th>Dyn.+alle</th><th>ggü. Festpreis</th>${s.vorhanden.wp ? "<th>WP-Netzbezug</th><th>davon WW</th>" : ""}${s.vorhanden.akku ? "<th>Akku-Netzladung</th>" : ""}</tr>` +
+    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.imp)}</td><td>${eur(m.dyn)}</td>
+      ${ms.map(x => `<td class="${sign(m.dyn - m[x.cost])}">${eur(m.dyn - m[x.cost])}</td>`).join("")}
+      <td class="${sign(m.dyn - m.dyn_all)}">${eur(m.dyn - m.dyn_all)}</td><td>${eur(m.dyn_all)}</td>
+      <td class="${sign(m.fix - m.dyn_all)}">${eur(m.fix - m.dyn_all)}</td>
+      ${s.vorhanden.wp ? `<td>${kwh(m.wp_grid)}</td><td>${kwh(m.wp_ww)}</td>` : ""}${s.vorhanden.akku ? `<td>${kwh(m.bat_in)}</td>` : ""}</tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th>${eur(s.dyn)}</th>${ms.map(m => `<th>${eur(s[m.eff])}</th>`).join("")}
+      <th>${eur(s.effekt_alle)}</th><th>${eur(s.dyn_all)}</th><th>${eur(s.ersparnis_alle)}</th>
+      ${s.vorhanden.wp ? `<th>${kwh(s.wp_grid)}</th><th>${kwh(s.wp_ww)}</th>` : ""}${s.vorhanden.akku ? `<th>${kwh(s.bat_in)}</th>` : ""}</tr>`;
 
-  document.getElementById("wpParams").innerHTML = `
-    <dt>Verschiebbarer Anteil je Stunde</dt><dd>${num(o.wp_anteil_verschiebbar * 100, 0)} %</dd>
-    <dt>Verschiebefenster</dt><dd>± ${o.wp_fenster_h} h</dd>
-    <dt>Max. elektrische Leistung WP</dt><dd>${num(o.wp_max_kw)} kW</dd>
-    <dt>Mehrverbrauch verschobener Energie</dt><dd>${num(o.wp_mehrverbrauch_prozent, 0)} %</dd>
-    <dt>Mindest-Preisabstand</dt><dd>${num(o.wp_mindest_spread_ct)} ct/kWh</dd>`;
+  const cards = [];
+  if (s.vorhanden.ev) cards.push(`<div class="card"><h3>E-Auto</h3><dl>
+    <dt>Verschobene Ladevorgänge</dt><dd>${ev.sitzungen}</dd>
+    <dt>Verschobene Energie</dt><dd>${kwh(ev.kwh_verschoben)}</dd>
+    <dt>Ersparnis</dt><dd>${eur(s.effekt_ev)}</dd>
+    <dt>Fenster</dt><dd>Start ab ${o.ev_abend_ab_uhr}:00, fertig bis ${o.ev_fertig_bis_uhr}:00</dd>
+    <dt>Max. Ladeleistung</dt><dd>${num(o.ev_max_kw)} kW</dd></dl>
+    <div class="note">Nur der Netzanteil abendlicher/nächtlicher Ladevorgänge wird verschoben. Laden die Autos aus PV oder Hausakku, gibt es nichts zu verschieben.</div></div>`);
+  if (s.vorhanden.wp) cards.push(`<div class="card"><h3>Wärmepumpe</h3><dl>
+    <dt>WP-Netzbezug</dt><dd>${kwh(w.wp_netz_kwh)} (${pct(w.wp_netz_kwh, s.imp)})</dd>
+    <dt>Ø Preis WP-Strom</dt><dd>${ct(s.preis_wp_ct)} → ${ct(s.preis_wp_neu_ct)}</dd>
+    <dt><b>Heizung</b></dt><dd>${kwh(w.heizung.kwh_netz)}</dd>
+    <dt>&nbsp;&nbsp;verschoben · Ersparnis</dt><dd>${kwh(w.heizung.kwh_verschoben)} · ${eur(w.heizung.ersparnis_eur)}</dd>
+    <dt>&nbsp;&nbsp;Modell</dt><dd>${num(o.wp_heiz_anteil_verschiebbar * 100, 0)} %, ±${o.wp_heiz_fenster_h} h, ≤ ${num(o.wp_heiz_max_kw)} kW, +${num(o.wp_heiz_mehrverbrauch_prozent, 0)} %</dd>
+    <dt><b>Warmwasser</b></dt><dd>${kwh(w.warmwasser.kwh_netz)} · ${w.warmwasser.stunden} h</dd>
+    <dt>&nbsp;&nbsp;verschoben · Ersparnis</dt><dd>${kwh(w.warmwasser.kwh_verschoben)} · ${eur(w.warmwasser.ersparnis_eur)}</dd>
+    <dt>&nbsp;&nbsp;Modell</dt><dd>100 %, ±${o.ww_fenster_h} h, ≤ ${num(o.ww_max_kw)} kW, +${num(o.ww_mehrverbrauch_prozent, 0)} %</dd></dl>
+    <div class="note">Warmwasser-Stunden werden an der Spitzenleistung erkannt (≥ ${num(o.ww_schwelle_w, 0)} W). Der Speicher macht sie voll verschiebbar;
+      beim Heizen ist nur ein Anteil über die Speichermasse des Hauses verschiebbar. Mehrverbrauch: schlechtere Effizienz bzw. Speicherverluste.</div></div>`);
+  if (s.vorhanden.akku) cards.push(`<div class="card"><h3>Hausakku</h3><dl>
+    <dt>Netzladung gesamt</dt><dd>${kwh(ak.kwh_netzladung)}</dd>
+    <dt>Entladen (nach Verlusten)</dt><dd>${kwh(ak.kwh_entladen)}</dd>
+    <dt>Zusätzliche Vollzyklen</dt><dd>${num(ak.vollzyklen, 1)}</dd>
+    <dt>Ersparnis</dt><dd>${eur(s.effekt_akku)}</dd>
+    ${pa ? `<dt><b>PV-arme Tage (&lt; ${num(pa.schwelle_kwh, 0)} kWh)</b></dt><dd>${pa.tage_pv_arm} von ${pa.tage_gesamt}</dd>
+    <dt>&nbsp;&nbsp;davon mit Netzladung</dt><dd>${pa.tage_mit_netzladung}</dd>
+    <dt>&nbsp;&nbsp;Netzladung · Ersparnis</dt><dd>${kwh(pa.kwh_netzladung)} · ${eur(pa.ersparnis_eur)}</dd>` : ""}
+    <dt>Parameter</dt><dd>${num(o.akku_kapazitaet_kwh)} kWh, ${num(o.akku_max_netzladeleistung_kw)} kW, η ${num(o.akku_wirkungsgrad, 2)}, Spread ≥ ${num(o.akku_mindest_spread_ct)} ct</dd></dl>
+    <div class="note">Der Akku lädt in günstigen Stunden aus dem Netz, soweit der <b>reale</b> Ladestand bis zur Entladung Platz lässt –
+      PV-Ladung wird also nicht verdrängt. An PV-armen Tagen ist der Akku meist leer, deshalb passiert die Netzladung vor allem dort.
+      Entladen wird innerhalb von 24 h in teureren Stunden, wenn Preis × Wirkungsgrad den Ladepreis um den Mindestabstand übersteigt.</div></div>`);
+  document.getElementById("measureCards").innerHTML = cards.join("");
 }
 
 // ------------------------------------------------------------------ Tagesdetail
@@ -341,21 +352,28 @@ async function loadDay() {
   const R = r.rows || [], labels = R.map(x => new Date(x.t * 1000).getHours() + " Uhr");
   const sum = k => R.reduce((a, x) => a + x[k], 0);
   const priceLine = { type: "line", label: "Dyn. Preis (ct/kWh)", data: R.map(x => x.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2, stepped: true };
-  const opts = { scales: { x: {}, y: kwhAxis(), y1: ctAxis } };
-  if (VIEW === "wp") {
-    chart("cWpDay", { type: "bar", data: { labels, datasets: [priceLine,
-      { label: "WP-Netzbezug original (kWh)", data: R.map(x => x.wp_grid), backgroundColor: css("--fix") },
-      { label: "WP-Netzbezug verschoben (kWh)", data: R.map(x => x.wp_grid_new), backgroundColor: css("--wp") } ] }, options: opts });
-    document.getElementById("wpDayNote").textContent = R.length
-      ? `WP-Netzbezug ${num(sum("wp_grid"), 1)} kWh · dynamisch ${eur(sum("dyn"))} · mit WP-Verschiebung ${eur(sum("dyn_wp"))} · Festpreis ${eur(sum("fix"))}`
+  const opts = { scales: { x: {}, y: kwhAxis(), y1: ctAxis() } };
+  if (VIEW === "shift") {
+    const v = DATA.summary.vorhanden, ds = [priceLine,
+      { label: "Netzbezug wie gemessen", data: R.map(x => x.imp), backgroundColor: css("--fix") },
+      { label: "Netzbezug alle Maßnahmen", data: R.map(x => x.imp_all), backgroundColor: css("--all") }];
+    if (v.wp) ds.push(
+      { type: "line", label: "WP-Netzbezug original", data: R.map(x => x.wp_grid), borderColor: css("--ww"), pointRadius: 0, borderWidth: 1.5 },
+      { type: "line", label: "WP-Netzbezug verschoben", data: R.map(x => x.wp_grid_new), borderColor: css("--wp"), pointRadius: 0, borderWidth: 2 });
+    if (v.akku) ds.push({ label: "Akku-Netzladung", data: R.map(x => x.bat_in), backgroundColor: css("--bat") });
+    chart("cShiftDay", { type: "bar", data: { labels, datasets: ds }, options: opts });
+    const pv = sum("pv");
+    document.getElementById("shiftDayNote").textContent = R.length
+      ? `Dynamisch ${eur(sum("dyn"))} → alle Maßnahmen ${eur(sum("dyn_all"))} · Festpreis ${eur(sum("fix"))}` +
+        (v.wp ? ` · WP-Netzbezug ${num(sum("wp_grid"), 1)} kWh (davon WW ${num(sum("wp_ww"), 1)})` : "") +
+        (v.akku ? ` · Akku-Netzladung ${num(sum("bat_in"), 1)} kWh` : "") + (pv ? ` · PV ${num(pv, 1)} kWh` : "")
       : "Keine Daten für diesen Tag.";
   } else {
     chart("cDay", { type: "bar", data: { labels, datasets: [priceLine,
-      { label: "Bezug (kWh)", data: R.map(x => x.imp), backgroundColor: css("--dyn") },
-      { label: "Bezug E-Auto/Akku (kWh)", data: R.map(x => x.opt), backgroundColor: css("--opt") },
+      { label: "Netzbezug (kWh)", data: R.map(x => x.imp), backgroundColor: css("--dyn") },
       { label: "Einspeisung (kWh)", data: R.map(x => -x.exp), backgroundColor: css("--fix") } ] }, options: opts });
     document.getElementById("dayNote").textContent = R.length
-      ? `Festpreis ${eur(sum("fix"))} · dynamisch ${eur(sum("dyn"))} · mit E-Auto/Akku ${eur(sum("dyn_opt"))} · Bezug ${num(sum("imp"), 1)} kWh`
+      ? `Festpreis ${eur(sum("fix"))} · dynamisch ${eur(sum("dyn"))} · Bezug ${num(sum("imp"), 1)} kWh · Einspeisung ${num(sum("exp"), 1)} kWh`
       : "Keine Daten für diesen Tag.";
   }
 }

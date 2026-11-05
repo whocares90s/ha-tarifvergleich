@@ -8,6 +8,11 @@ configuration:
   statistik_einspeisung:
     name: Statistik Einspeisung
     description: Zählerstand Einspeisung (kWh), z. B. sensor.ebz_energy_out
+  pv_statistiken:
+    name: Statistiken PV-Ertrag (optional)
+    description: Zählerstände der PV-Anlagen (kWh). Nur für die Auswertung „PV-arme Tage“ beim Hausakku.
+  pv_wenig_kwh_tag:
+    name: PV-armer Tag unter (kWh/Tag)
   festpreis_arbeitspreis_ct_brutto:
     name: Festpreis Arbeitspreis (ct/kWh brutto)
   festpreis_grundpreis_eur_jahr_brutto:
@@ -38,8 +43,9 @@ configuration:
     description: Ein dynamischer Tarif braucht ein intelligentes Messsystem (iMSys). Kosten laut grundzuständigem Messstellenbetreiber.
   einspeiseverguetung_ct:
     name: Einspeisevergütung (ct/kWh)
-  ev_verschiebung:
-    name: Szenario E-Auto-Ladeverschiebung
+  e_auto_vorhanden:
+    name: E-Auto vorhanden
+    description: Aus = keine E-Auto-Verschiebung, Bereich wird in der Ansicht ausgeblendet.
   ev_statistiken:
     name: Statistiken Wallbox-Energie
     description: Zählerstände der Wallboxen (kWh oder Wh), werden summiert.
@@ -49,8 +55,39 @@ configuration:
     name: Verschiebbar für Ladestarts ab (Uhr)
   ev_fertig_bis_uhr:
     name: Laden fertig bis (Uhr)
-  akku_arbitrage:
-    name: Szenario Akku-Netzladung
+  waermepumpe_vorhanden:
+    name: Wärmepumpe vorhanden
+    description: Aus = keine WP-Verschiebung, Bereich wird in der Ansicht ausgeblendet.
+  wp_statistik:
+    name: Statistik Wärmepumpe Energie (kWh)
+  wp_leistung_statistik:
+    name: Statistik Wärmepumpe Leistung (W)
+    description: Wird gebraucht, um Warmwasser-Stunden (hohe Spitzenleistung) vom Heizbetrieb zu trennen.
+  wp_heiz_anteil_verschiebbar:
+    name: Heizung – verschiebbarer Anteil (0–1)
+    description: z. B. 0.4 = 40 % des Heizstroms jeder Stunde können vor- oder nachgeholt werden (Estrich/Puffer).
+  wp_heiz_fenster_h:
+    name: Heizung – Verschiebefenster (± Stunden)
+  wp_heiz_max_kw:
+    name: Heizung – max. elektrische Leistung (kW)
+  wp_heiz_mehrverbrauch_prozent:
+    name: Heizung – Mehrverbrauch verschobener Energie (%)
+    description: Höhere Vorlauftemperatur beim Vorheizen senkt die Effizienz.
+  ww_schwelle_w:
+    name: Warmwasser – Erkennungsschwelle Leistung (W)
+    description: Stunden, in denen die WP mindestens diese Leistung erreicht, gelten als Warmwasserbereitung.
+  ww_fenster_h:
+    name: Warmwasser – Verschiebefenster (± Stunden)
+  ww_max_kw:
+    name: Warmwasser – max. elektrische Leistung (kW)
+  ww_mehrverbrauch_prozent:
+    name: Warmwasser – Mehrverbrauch (%)
+    description: Speicherverluste durch früheres Aufheizen.
+  wp_mindest_spread_ct:
+    name: WP Mindest-Preisabstand (ct/kWh)
+  hausakku_vorhanden:
+    name: Hausakku vorhanden
+    description: Aus = keine Akku-Netzladung, Bereich wird in der Ansicht ausgeblendet.
   akku_soc_statistik:
     name: Statistik Akku-Ladestand (%)
   akku_kapazitaet_kwh:
@@ -62,22 +99,5 @@ configuration:
   akku_mindest_spread_ct:
     name: Akku Mindest-Preisabstand (ct/kWh)
     description: Netzladung nur, wenn späterer Preis × Wirkungsgrad mindestens so viel teurer ist (deckt Verschleiß ab).
-  wp_verschiebung:
-    name: Szenario Wärmepumpen-Verschiebung
-    description: Eigenes Szenario und eigene Ansicht, getrennt von E-Auto/Akku.
-  wp_statistik:
-    name: Statistik Wärmepumpe Energie (kWh)
-  wp_anteil_verschiebbar:
-    name: Verschiebbarer Anteil des WP-Netzbezugs (0–1)
-    description: z. B. 0.4 = 40 % jeder Stunde können vor- oder nachgeholt werden (Fußbodenheizung/Pufferspeicher).
-  wp_fenster_h:
-    name: Verschiebefenster (± Stunden)
-  wp_max_kw:
-    name: Max. elektrische Leistung WP (kW)
-  wp_mehrverbrauch_prozent:
-    name: Mehrverbrauch verschobener Energie (%)
-    description: Höhere Vorlauftemperatur beim Vorheizen senkt die Effizienz.
-  wp_mindest_spread_ct:
-    name: WP Mindest-Preisabstand (ct/kWh)
   log_level:
     name: Log-Level

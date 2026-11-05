@@ -131,7 +131,22 @@ class HAClient:
                 _LOG.debug("import_statistics Variante %s abgelehnt: %s", idx, err)
         raise HAError(f"Statistik-Import für {metadata.get('statistic_id')} fehlgeschlagen: {last_err}")
 
+    async def clear_statistics(self, statistic_ids: list[str]) -> None:
+        await self.call({"type": "recorder/clear_statistics", "statistic_ids": statistic_ids})
+
     # ------------------------------------------------------------------ REST
+    async def delete_state(self, entity_id: str) -> None:
+        try:
+            async with self._session.delete(
+                f"{API_URL}/states/{entity_id}",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status not in (200, 404):
+                    _LOG.debug("Löschen von %s: HTTP %s", entity_id, resp.status)
+        except aiohttp.ClientError as err:
+            _LOG.debug("Löschen von %s fehlgeschlagen: %s", entity_id, err)
+
     async def set_state(self, entity_id: str, state, attributes: dict) -> None:
         url = f"{API_URL}/states/{entity_id}"
         headers = {"Authorization": f"Bearer {TOKEN}"}

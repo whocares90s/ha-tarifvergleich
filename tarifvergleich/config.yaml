@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.2.0"
+version: "0.3.0"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -18,6 +18,10 @@ options:
   startdatum: "2026-02-01"
   statistik_netzbezug: sensor.ebz_energy_in
   statistik_einspeisung: sensor.ebz_energy_out
+  pv_statistiken:
+    - sensor.deye_sunsynk_sol_ark_3_phase_pv_energy
+    - sensor.shelly_garagenpv_energy
+  pv_wenig_kwh_tag: 5.0
   festpreis_arbeitspreis_ct_brutto: 29.17
   festpreis_grundpreis_eur_jahr_brutto: 197.09
   mwst_prozent: 19
@@ -32,7 +36,7 @@ options:
   dyn_grundgebuehr_eur_monat_brutto: 5.99
   messstelle_dyn_eur_jahr_brutto: 50.0
   einspeiseverguetung_ct: 7.9
-  ev_verschiebung: true
+  e_auto_vorhanden: true
   ev_statistiken:
     - sensor.go_echarger_505191_total_energy_charged
     - sensor.draussen_monta_liviqo_eichrecht_meter_reading
@@ -40,24 +44,32 @@ options:
   ev_max_kw: 11.0
   ev_abend_ab_uhr: 15
   ev_fertig_bis_uhr: 7
-  akku_arbitrage: true
+  waermepumpe_vorhanden: true
+  wp_statistik: sensor.shelly_waermepumpe_energy
+  wp_leistung_statistik: sensor.shelly_waermepumpe_power
+  wp_heiz_anteil_verschiebbar: 0.4
+  wp_heiz_fenster_h: 3
+  wp_heiz_max_kw: 3.0
+  wp_heiz_mehrverbrauch_prozent: 5.0
+  ww_schwelle_w: 3500
+  ww_fenster_h: 6
+  ww_max_kw: 5.0
+  ww_mehrverbrauch_prozent: 2.0
+  wp_mindest_spread_ct: 1.0
+  hausakku_vorhanden: true
   akku_soc_statistik: sensor.deye_sunsynk_sol_ark_3_phase_battery_state_of_charge
   akku_kapazitaet_kwh: 29.3
   akku_max_netzladeleistung_kw: 6.0
   akku_wirkungsgrad: 0.9
   akku_mindest_spread_ct: 3.0
-  wp_verschiebung: true
-  wp_statistik: sensor.shelly_waermepumpe_energy
-  wp_anteil_verschiebbar: 0.4
-  wp_fenster_h: 3
-  wp_max_kw: 5.0
-  wp_mehrverbrauch_prozent: 5.0
-  wp_mindest_spread_ct: 1.0
   log_level: info
 schema:
   startdatum: match(^\d{4}-\d{2}-\d{2}$)
   statistik_netzbezug: str
   statistik_einspeisung: str
+  pv_statistiken:
+    - str
+  pv_wenig_kwh_tag: float
   festpreis_arbeitspreis_ct_brutto: float
   festpreis_grundpreis_eur_jahr_brutto: float
   mwst_prozent: float
@@ -72,23 +84,28 @@ schema:
   dyn_grundgebuehr_eur_monat_brutto: float
   messstelle_dyn_eur_jahr_brutto: float
   einspeiseverguetung_ct: float
-  ev_verschiebung: bool
+  e_auto_vorhanden: bool
   ev_statistiken:
     - str
   ev_max_kw: float
   ev_abend_ab_uhr: int(0,23)
   ev_fertig_bis_uhr: int(0,23)
-  akku_arbitrage: bool
-  akku_soc_statistik: str
+  waermepumpe_vorhanden: bool
+  wp_statistik: str?
+  wp_leistung_statistik: str?
+  wp_heiz_anteil_verschiebbar: float(0,1)
+  wp_heiz_fenster_h: int(1,12)
+  wp_heiz_max_kw: float
+  wp_heiz_mehrverbrauch_prozent: float(0,50)
+  ww_schwelle_w: float
+  ww_fenster_h: int(1,24)
+  ww_max_kw: float
+  ww_mehrverbrauch_prozent: float(0,50)
+  wp_mindest_spread_ct: float
+  hausakku_vorhanden: bool
+  akku_soc_statistik: str?
   akku_kapazitaet_kwh: float
   akku_max_netzladeleistung_kw: float
   akku_wirkungsgrad: float(0.5,1)
   akku_mindest_spread_ct: float
-  wp_verschiebung: bool
-  wp_statistik: str
-  wp_anteil_verschiebbar: float(0,1)
-  wp_fenster_h: int(1,12)
-  wp_max_kw: float
-  wp_mehrverbrauch_prozent: float(0,50)
-  wp_mindest_spread_ct: float
   log_level: list(debug|info|warning|error)
