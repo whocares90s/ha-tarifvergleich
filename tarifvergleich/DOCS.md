@@ -23,6 +23,8 @@ HA-Statistik stündlich ist.
 | Festpreis | Bezug × Arbeitspreis + Grundpreis anteilig |
 | Dynamisch | gleicher Bezug, stündlicher dynamischer Preis |
 | Dynamisch + Verschiebung | E-Auto-Netzladung abends/nachts in die billigsten Stunden bis zur Fertig-Uhrzeit; Akku lädt in billigen Stunden aus dem Netz, wenn der reale Ladestand Platz hatte, und ersetzt teuren Bezug innerhalb von 24 h |
+| Dynamisch + WP-Verschiebung (eigener Reiter) | Ein Anteil des WP-Netzbezugs jeder Stunde wandert innerhalb ±Fenster in billigere Stunden (Vorheizen/Nachlaufen), mit Mehrverbrauch für die verschobene Energie und begrenzt durch die WP-Höchstleistung |
+| Alle Maßnahmen | WP-Verschiebung, danach E-Auto und Akku auf dem verbleibenden Bezug |
 
 Die Verschiebung rechnet mit den bekannten Day-Ahead-Preisen (perfekte Voraussicht innerhalb des
 Fensters) und ist damit eine **Obergrenze** dessen, was evcc o. ä. erreicht.

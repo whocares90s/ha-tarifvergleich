@@ -37,6 +37,13 @@ DEFAULTS: dict = {
     "akku_max_netzladeleistung_kw": 6.0,
     "akku_wirkungsgrad": 0.9,
     "akku_mindest_spread_ct": 3.0,
+    "wp_verschiebung": True,
+    "wp_statistik": "sensor.shelly_waermepumpe_energy",
+    "wp_anteil_verschiebbar": 0.4,
+    "wp_fenster_h": 3,
+    "wp_max_kw": 5.0,
+    "wp_mehrverbrauch_prozent": 5.0,
+    "wp_mindest_spread_ct": 1.0,
     "log_level": "info",
 }
 

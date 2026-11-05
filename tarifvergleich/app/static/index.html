@@ -8,26 +8,31 @@
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #1d2430; --muted: #6b7686; --line: #e3e7ee;
-    --fix: #8a94a6; --dyn: #2f6fde; --opt: #1f9d6b; --price: #d9822b; --bad: #c8453b;
+    --fix: #8a94a6; --dyn: #2f6fde; --opt: #1f9d6b; --wp: #c0569a; --all: #7a5bd6; --price: #d9822b; --bad: #c8453b;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #111418; --card: #1a1f26; --text: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
-      --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --price: #f0a050; --bad: #f07067;
+      --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --wp: #e07bbd; --all: #a08af0; --price: #f0a050; --bad: #f07067;
     }
   }
   :root[data-theme="dark"] {
     --bg: #111418; --card: #1a1f26; --text: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
-    --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --price: #f0a050; --bad: #f07067;
+    --fix: #9aa4b2; --dyn: #5b8ff0; --opt: #34c48b; --wp: #e07bbd; --all: #a08af0; --price: #f0a050; --bad: #f07067;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 48px; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
   h1 { font-size: 22px; margin: 0; }
   h2 { font-size: 15px; margin: 0 0 12px; }
   .muted { color: var(--muted); }
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+               padding: 8px 14px; color: var(--muted); font-weight: 600; }
+  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--dyn); }
+  .view[hidden] { display: none; }
   .grid { display: grid; gap: 12px; }
   .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 12px; }
   .two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
@@ -50,6 +55,7 @@
   dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-variant-numeric: tabular-nums; }
   dt { color: var(--muted); } dd { margin: 0; text-align: right; }
   .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .intro { margin: 0 0 12px; color: var(--muted); max-width: 80ch; }
   section { margin-top: 12px; }
 </style>
 </head>
@@ -63,40 +69,86 @@
     <button id="refresh" title="Neu berechnen">↻ Neu berechnen</button>
   </header>
 
+  <nav role="tablist">
+    <button role="tab" data-view="overview" aria-selected="true">Übersicht</button>
+    <button role="tab" data-view="wp" aria-selected="false">Wärmepumpe</button>
+  </nav>
+
   <div id="error" class="card err" hidden></div>
 
-  <div class="grid kpis" id="kpis"></div>
+  <!-- ===================================================== Übersicht -->
+  <div class="view" id="view-overview">
+    <div class="grid kpis" id="kpis"></div>
 
-  <section class="grid two">
-    <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cMonthly"></canvas></div></div>
-    <div class="card"><h2>Kumulierte Ersparnis gegenüber Festpreis</h2><div class="chart"><canvas id="cCum"></canvas></div></div>
-  </section>
+    <section class="grid two">
+      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cMonthly"></canvas></div></div>
+      <div class="card"><h2>Kumulierte Ersparnis gegenüber Festpreis</h2><div class="chart"><canvas id="cCum"></canvas></div></div>
+    </section>
 
-  <section class="grid two">
-    <div class="card"><h2>Dynamischer Preis heute &amp; morgen</h2><div class="chart"><canvas id="cFuture"></canvas></div></div>
-    <div class="card"><h2>Tagesprofil: Ø Preis und Ø Netzbezug je Stunde</h2><div class="chart"><canvas id="cProfile"></canvas></div></div>
-  </section>
+    <section class="grid two">
+      <div class="card"><h2>Dynamischer Preis heute &amp; morgen</h2><div class="chart"><canvas id="cFuture"></canvas></div></div>
+      <div class="card"><h2>Tagesprofil: Ø Preis und Ø Netzbezug je Stunde</h2><div class="chart"><canvas id="cProfile"></canvas></div></div>
+    </section>
 
-  <section class="card">
-    <div class="row"><h2 style="margin:0">Tagesdetail</h2>
-      <span><button id="prevDay">‹</button> <input type="date" id="day"> <button id="nextDay">›</button></span></div>
-    <div class="chart"><canvas id="cDay"></canvas></div>
-    <div class="note" id="dayNote"></div>
-  </section>
+    <section class="card">
+      <div class="row"><h2 style="margin:0">Tagesdetail</h2>
+        <span><button data-shift="-1">‹</button> <input type="date" class="day"> <button data-shift="1">›</button></span></div>
+      <div class="chart"><canvas id="cDay"></canvas></div>
+      <div class="note" id="dayNote"></div>
+    </section>
 
-  <section class="card">
-    <h2>Monatsübersicht</h2>
-    <div class="scroll"><table id="tMonthly"></table></div>
-  </section>
+    <section class="card">
+      <h2>Monatsübersicht</h2>
+      <div class="scroll"><table id="tMonthly"></table></div>
+    </section>
 
-  <section class="grid two">
-    <div class="card"><h2>Preisformel dynamisch</h2><dl id="formula"></dl>
-      <div class="note">Endpreis = (Börsenpreis + Aufschläge netto) × MwSt. Grundpreise werden stündlich anteilig verrechnet.</div></div>
-    <div class="card"><h2>Lastverschiebung (Szenario)</h2><dl id="shift"></dl>
-      <div class="note">E-Auto: Netzbezug abendlicher/nächtlicher Ladevorgänge wird in die günstigsten Stunden bis zur Fertig-Uhrzeit gelegt.
-        Akku: lädt in günstigen Stunden aus dem Netz, wenn der reale Ladestand Platz lässt, und ersetzt späteren teuren Bezug.
-        Es wird mit bekannten Day-Ahead-Preisen gerechnet – das ist eine Obergrenze dessen, was eine Steuerung wie evcc erreichen kann.</div></div>
-  </section>
+    <section class="grid two">
+      <div class="card"><h2>Preisformel dynamisch</h2><dl id="formula"></dl>
+        <div class="note">Endpreis = (Börsenpreis + Aufschläge netto) × MwSt. Grundpreise werden stündlich anteilig verrechnet.</div></div>
+      <div class="card"><h2>Lastverschiebung E-Auto &amp; Akku (Szenario)</h2><dl id="shift"></dl>
+        <div class="note">E-Auto: Netzbezug abendlicher/nächtlicher Ladevorgänge wird in die günstigsten Stunden bis zur Fertig-Uhrzeit gelegt.
+          Akku: lädt in günstigen Stunden aus dem Netz, wenn der reale Ladestand Platz lässt, und ersetzt späteren teuren Bezug.
+          Es wird mit bekannten Day-Ahead-Preisen gerechnet – das ist eine Obergrenze dessen, was eine Steuerung wie evcc erreichen kann.
+          Die Wärmepumpe ist hier <b>nicht</b> enthalten, siehe eigener Reiter.</div></div>
+    </section>
+  </div>
+
+  <!-- ===================================================== Wärmepumpe -->
+  <div class="view" id="view-wp" hidden>
+    <p class="intro" id="wpIntro"></p>
+    <div class="grid kpis" id="wpKpis"></div>
+
+    <section class="grid two">
+      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cWpMonthly"></canvas></div></div>
+      <div class="card"><h2>WP-Netzbezug und Ersparnis durch Verschiebung je Monat</h2><div class="chart"><canvas id="cWpEffect"></canvas></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Tagesprofil: Ø WP-Netzbezug je Stunde – original vs. verschoben</h2>
+      <div class="chart"><canvas id="cWpProfile"></canvas></div>
+    </section>
+
+    <section class="card">
+      <div class="row"><h2 style="margin:0">Tagesdetail Wärmepumpe</h2>
+        <span><button data-shift="-1">‹</button> <input type="date" class="day"> <button data-shift="1">›</button></span></div>
+      <div class="chart"><canvas id="cWpDay"></canvas></div>
+      <div class="note" id="wpDayNote"></div>
+    </section>
+
+    <section class="card">
+      <h2>Monatsübersicht Wärmepumpe</h2>
+      <div class="scroll"><table id="tWpMonthly"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Modell &amp; Annahmen</h2><dl id="wpParams"></dl>
+      <div class="note">Je Stunde darf der eingestellte Anteil des WP-Netzbezugs innerhalb des Fensters in billigere Stunden
+        wandern (Vorheizen über Estrich/Puffer oder kurz nachlaufen lassen). Verschobene Energie kostet einen Mehrverbrauch,
+        weil höhere Vorlauftemperaturen die Effizienz senken. Teuerste Stunden werden zuerst entlastet, die WP-Höchstleistung
+        begrenzt die Zielstunden. Als WP-Netzanteil zählt der WP-Verbrauch, soweit in der Stunde Netzbezug da war.
+        „Alle Maßnahmen“ kombiniert WP-Verschiebung mit E-Auto und Akku aus der Übersicht.</div>
+    </section>
+  </div>
 </main>
 
 <script>
@@ -106,8 +158,10 @@ const kwh = v => v == null ? "–" : v.toLocaleString("de-DE", { maximumFraction
 const num = (v, d = 1) => v == null ? "–" : v.toLocaleString("de-DE", { maximumFractionDigits: d, minimumFractionDigits: d });
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const monthName = k => { const [y, m] = k.split("-"); return new Date(+y, +m - 1, 1).toLocaleDateString("de-DE", { month: "short", year: "2-digit" }); };
+const sign = v => v >= 0 ? "pos" : "neg";
 const charts = {};
-let DATA = null;
+let DATA = null, VIEW = "overview";
+try { VIEW = localStorage.getItem("tv-view") || "overview"; } catch (e) {}
 
 function chart(id, cfg) {
   if (charts[id]) charts[id].destroy();
@@ -119,14 +173,36 @@ function chart(id, cfg) {
   }
   charts[id] = new Chart(document.getElementById(id), cfg);
 }
+const eurTip = { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${eur(c.parsed.y)}` } } };
+const eurAxis = { ticks: { callback: v => v + " €" } };
+const kwhAxis = () => ({ title: { display: true, text: "kWh", color: css("--muted") } });
+const ctAxis = { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " ct" } };
 
 function kpi(label, value, sub, cls) {
   return `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls || ""}">${value}</div><div class="sub">${sub || ""}</div></div>`;
 }
+const pct = (a, b) => b ? `${num(a / b * 100, 1)} %` : "";
 
+// ------------------------------------------------------------------ Tabs
+function showView(v) {
+  VIEW = v;
+  try { localStorage.setItem("tv-view", v); } catch (e) {}
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
+  document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
+  if (DATA) renderView();
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
+
+function renderView() {
+  if (!DATA.summary || !DATA.summary.stunden) return;
+  if (VIEW === "wp") renderWp(DATA); else renderOverview(DATA);
+  loadDay();
+}
+
+// ------------------------------------------------------------------ Gemeinsam
 function render(d) {
   DATA = d;
-  const s = d.summary || {}, t = d.tarif;
+  const s = d.summary || {};
   const err = document.getElementById("error");
   err.hidden = !d.status.fehler; err.textContent = d.status.fehler ? "Fehler im letzten Lauf: " + d.status.fehler : "";
   document.getElementById("status").textContent = d.status.letzter_lauf ? "Stand " + new Date(d.status.letzter_lauf).toLocaleString("de-DE") : "";
@@ -134,31 +210,35 @@ function render(d) {
   document.getElementById("period").textContent =
     `${new Date(s.von).toLocaleDateString("de-DE")} – ${new Date(s.bis).toLocaleDateString("de-DE")} · ${num(s.stunden / 24, 0)} Tage` +
     (s.stunden_ohne_preis ? ` · ${s.stunden_ohne_preis} h ohne Preis` : "");
+  const D = d.daily;
+  document.querySelectorAll("input.day").forEach(el => {
+    if (!el.value && D.length) { el.min = D[0].key; el.max = D[D.length - 1].key; el.value = D[D.length - 1].key; }
+  });
+  showView(VIEW);
+}
 
-  const pct = (a, b) => b ? ` (${num(a / b * 100, 1)} %)` : "";
+// ------------------------------------------------------------------ Übersicht
+function renderOverview(d) {
+  const s = d.summary, t = d.tarif, M = d.monthly, D = d.daily;
   document.getElementById("kpis").innerHTML =
     kpi("Festpreis", eur(s.fix), `${ct(t.fix_ct_brutto)}/kWh · ${kwh(s.imp)}`) +
     kpi("Dynamisch", eur(s.dyn), `Ø ${ct(s.preis_gewichtet_ct)}/kWh`) +
-    kpi("Ersparnis dynamisch", eur(s.ersparnis), pct(s.ersparnis, s.fix).trim(), s.ersparnis >= 0 ? "pos" : "neg") +
-    kpi("Dynamisch + Verschiebung", eur(s.dyn_opt), `Ø ${ct(s.preis_gewichtet_opt_ct)}/kWh`) +
-    kpi("Ersparnis mit Verschiebung", eur(s.ersparnis_opt), pct(s.ersparnis_opt, s.fix).trim(), s.ersparnis_opt >= 0 ? "pos" : "neg") +
+    kpi("Ersparnis dynamisch", eur(s.ersparnis), pct(s.ersparnis, s.fix), sign(s.ersparnis)) +
+    kpi("Dyn. + E-Auto/Akku", eur(s.dyn_opt), `Ø ${ct(s.preis_gewichtet_opt_ct)}/kWh`) +
+    kpi("Ersparnis mit E-Auto/Akku", eur(s.ersparnis_opt), pct(s.ersparnis_opt, s.fix), sign(s.ersparnis_opt)) +
     kpi("Einspeisung", eur(s.feed), `${kwh(s.exp)} · in beiden Tarifen gleich`);
 
-  const M = d.monthly;
   chart("cMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
     { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
     { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
-    { label: "Dyn. + Verschiebung", data: M.map(m => m.dyn_opt), backgroundColor: css("--opt") } ] },
-    options: { scales: { x: {}, y: { ticks: { callback: v => v + " €" } } },
-      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${eur(c.parsed.y)}` } } } } });
+    { label: "Dyn. + E-Auto/Akku", data: M.map(m => m.dyn_opt), backgroundColor: css("--opt") } ] },
+    options: { scales: { x: {}, y: eurAxis }, plugins: eurTip } });
 
   let a = 0, b = 0;
-  const D = d.daily;
   chart("cCum", { type: "line", data: { labels: D.map(x => new Date(x.key).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })), datasets: [
     { label: "Dynamisch", data: D.map(x => (a += x.fix - x.dyn)), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2 },
-    { label: "Dyn. + Verschiebung", data: D.map(x => (b += x.fix - x.dyn_opt)), borderColor: css("--opt"), pointRadius: 0, borderWidth: 2 } ] },
-    options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { ticks: { callback: v => v + " €" } } },
-      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${eur(c.parsed.y)}` } } } } });
+    { label: "Dyn. + E-Auto/Akku", data: D.map(x => (b += x.fix - x.dyn_opt)), borderColor: css("--opt"), pointRadius: 0, borderWidth: 2 } ] },
+    options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: eurAxis }, plugins: eurTip } });
 
   const F = d.future, nowH = Math.floor(Date.now() / 3600000) * 3600;
   chart("cFuture", { type: "bar", data: { labels: F.map(p => new Date(p.start).toLocaleString("de-DE", { weekday: "short", hour: "2-digit" })), datasets: [
@@ -171,16 +251,14 @@ function render(d) {
   chart("cProfile", { type: "bar", data: { labels: P.map(p => p.h + " Uhr"), datasets: [
     { type: "line", label: "Ø Preis (ct/kWh)", data: P.map(p => p.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 },
     { label: "Ø Bezug (kWh)", data: P.map(p => p.imp), backgroundColor: css("--dyn") },
-    { label: "Ø Bezug verschoben (kWh)", data: P.map(p => p.opt), backgroundColor: css("--opt") } ] },
-    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { title: { display: true, text: "kWh", color: css("--muted") } },
-      y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " ct" } } } } });
+    { label: "Ø Bezug E-Auto/Akku (kWh)", data: P.map(p => p.opt), backgroundColor: css("--opt") } ] },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis } } });
 
-  const tbl = document.getElementById("tMonthly");
-  tbl.innerHTML = `<tr><th>Monat</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th><th>Dyn.+Versch.</th><th>Δ</th><th>Bezug versch.</th></tr>` +
+  document.getElementById("tMonthly").innerHTML = `<tr><th>Monat</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th><th>Dyn.+E-Auto/Akku</th><th>Δ</th></tr>` +
     M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.imp)}</td><td>${ct(m.spot_mittel_ct)}</td><td>${ct(m.preis_gewichtet_ct)}</td>
-      <td>${eur(m.fix)}</td><td>${eur(m.dyn)}</td><td class="${m.fix - m.dyn >= 0 ? "pos" : "neg"}">${eur(m.fix - m.dyn)}</td>
-      <td>${eur(m.dyn_opt)}</td><td class="${m.fix - m.dyn_opt >= 0 ? "pos" : "neg"}">${eur(m.fix - m.dyn_opt)}</td><td>${kwh(m.opt)}</td></tr>`).join("") +
-    `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th></th><th>${ct(s.preis_gewichtet_ct)}</th><th>${eur(s.fix)}</th><th>${eur(s.dyn)}</th><th>${eur(s.ersparnis)}</th><th>${eur(s.dyn_opt)}</th><th>${eur(s.ersparnis_opt)}</th><th>${kwh(s.opt)}</th></tr>`;
+      <td>${eur(m.fix)}</td><td>${eur(m.dyn)}</td><td class="${sign(m.fix - m.dyn)}">${eur(m.fix - m.dyn)}</td>
+      <td>${eur(m.dyn_opt)}</td><td class="${sign(m.fix - m.dyn_opt)}">${eur(m.fix - m.dyn_opt)}</td></tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th></th><th>${ct(s.preis_gewichtet_ct)}</th><th>${eur(s.fix)}</th><th>${eur(s.dyn)}</th><th>${eur(s.ersparnis)}</th><th>${eur(s.dyn_opt)}</th><th>${eur(s.ersparnis_opt)}</th></tr>`;
 
   const f = Object.entries(t.aufschlaege_ct_netto).map(([k, v]) => `<dt>${k}</dt><dd>${num(v, 3)} ct netto</dd>`).join("");
   document.getElementById("formula").innerHTML = `<dt>Börsenpreis Day-Ahead (DE-LU)</dt><dd>variabel</dd>${f}
@@ -199,49 +277,107 @@ function render(d) {
     <dt>Akku: zusätzliche Vollzyklen</dt><dd>${num(ak.vollzyklen, 1)}</dd>
     <dt>Akku: Ersparnis durch Arbitrage</dt><dd>${eur(ak.ersparnis_eur)}</dd>
     <dt>Parameter</dt><dd>${num(o.akku_kapazitaet_kwh)} kWh, ${num(o.akku_max_netzladeleistung_kw)} kW, η ${num(o.akku_wirkungsgrad, 2)}, Spread ≥ ${num(o.akku_mindest_spread_ct)} ct</dd>`;
-
-  const dayInput = document.getElementById("day");
-  if (!dayInput.value && D.length) { dayInput.min = D[0].key; dayInput.max = D[D.length - 1].key; dayInput.value = D[D.length - 1].key; }
-  loadDay();
 }
 
+// ------------------------------------------------------------------ Wärmepumpe
+function renderWp(d) {
+  const s = d.summary, o = d.optionen, M = d.monthly, w = s.wp;
+  const intro = document.getElementById("wpIntro");
+  if (!o.wp_verschiebung) {
+    intro.textContent = "Das Szenario Wärmepumpen-Verschiebung ist in der App-Konfiguration ausgeschaltet.";
+    document.getElementById("wpKpis").innerHTML = ""; return;
+  }
+  intro.textContent = `Separates Szenario: nur die Wärmepumpe wird verschoben (bis ${num(o.wp_anteil_verschiebbar * 100, 0)} % je Stunde, ±${o.wp_fenster_h} h), ` +
+    `alles andere bleibt wie gemessen. Vergleichsbasis ist „Dynamisch“ ohne Maßnahmen.`;
+
+  document.getElementById("wpKpis").innerHTML =
+    kpi("WP-Netzbezug", kwh(s.wp_grid), `${pct(s.wp_grid, s.imp)} des gesamten Netzbezugs`) +
+    kpi("Ø Preis WP-Strom", ct(s.preis_wp_ct), `verschoben: ${ct(s.preis_wp_neu_ct)}`) +
+    kpi("Verschobene Energie", kwh(w.kwh_verschoben), `+${kwh(w.kwh_mehrverbrauch)} Mehrverbrauch`) +
+    kpi("Ersparnis durch WP-Verschiebung", eur(s.wp_effekt), "gegenüber dynamisch ohne Maßnahmen", sign(s.wp_effekt)) +
+    kpi("Dyn. + WP vs. Festpreis", eur(s.ersparnis_wp), `Kosten ${eur(s.dyn_wp)} statt ${eur(s.fix)}`, sign(s.ersparnis_wp)) +
+    kpi("Alle Maßnahmen vs. Festpreis", eur(s.ersparnis_alle), `WP + E-Auto + Akku · Kosten ${eur(s.dyn_all)}`, sign(s.ersparnis_alle));
+
+  chart("cWpMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+    { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
+    { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
+    { label: "Dyn. + WP-Verschiebung", data: M.map(m => m.dyn_wp), backgroundColor: css("--wp") },
+    { label: "Alle Maßnahmen", data: M.map(m => m.dyn_all), backgroundColor: css("--all") } ] },
+    options: { scales: { x: {}, y: eurAxis }, plugins: eurTip } });
+
+  chart("cWpEffect", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+    { type: "line", label: "Ersparnis durch Verschiebung (€)", data: M.map(m => m.dyn - m.dyn_wp), borderColor: css("--opt"), yAxisID: "y1", pointRadius: 3, borderWidth: 2 },
+    { label: "WP-Netzbezug (kWh)", data: M.map(m => m.wp_grid), backgroundColor: css("--wp") } ] },
+    options: { scales: { x: {}, y: kwhAxis(), y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " €" } } } } });
+
+  const P = d.profile;
+  chart("cWpProfile", { type: "bar", data: { labels: P.map(p => p.h + " Uhr"), datasets: [
+    { type: "line", label: "Ø Preis (ct/kWh)", data: P.map(p => p.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 },
+    { label: "Ø WP-Netzbezug original (kWh)", data: P.map(p => p.wp_grid), backgroundColor: css("--fix") },
+    { label: "Ø WP-Netzbezug verschoben (kWh)", data: P.map(p => p.wp_grid_new), backgroundColor: css("--wp") } ] },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis } } });
+
+  const tot = k => M.reduce((a, m) => a + m[k], 0);
+  document.getElementById("tWpMonthly").innerHTML = `<tr><th>Monat</th><th>WP-Netzbezug</th><th>Ø Preis WP</th><th>Dynamisch</th><th>Dyn.+WP</th><th>Δ durch WP</th><th>Festpreis</th><th>Dyn.+WP ggü. fix</th><th>Alle Maßnahmen</th><th>ggü. fix</th></tr>` +
+    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.wp_grid)}</td><td>${ct(m.preis_wp_ct)}</td>
+      <td>${eur(m.dyn)}</td><td>${eur(m.dyn_wp)}</td><td class="${sign(m.dyn - m.dyn_wp)}">${eur(m.dyn - m.dyn_wp)}</td>
+      <td>${eur(m.fix)}</td><td class="${sign(m.fix - m.dyn_wp)}">${eur(m.fix - m.dyn_wp)}</td>
+      <td>${eur(m.dyn_all)}</td><td class="${sign(m.fix - m.dyn_all)}">${eur(m.fix - m.dyn_all)}</td></tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(tot("wp_grid"))}</th><th>${ct(s.preis_wp_ct)}</th><th>${eur(s.dyn)}</th><th>${eur(s.dyn_wp)}</th><th>${eur(s.wp_effekt)}</th><th>${eur(s.fix)}</th><th>${eur(s.ersparnis_wp)}</th><th>${eur(s.dyn_all)}</th><th>${eur(s.ersparnis_alle)}</th></tr>`;
+
+  document.getElementById("wpParams").innerHTML = `
+    <dt>Verschiebbarer Anteil je Stunde</dt><dd>${num(o.wp_anteil_verschiebbar * 100, 0)} %</dd>
+    <dt>Verschiebefenster</dt><dd>± ${o.wp_fenster_h} h</dd>
+    <dt>Max. elektrische Leistung WP</dt><dd>${num(o.wp_max_kw)} kW</dd>
+    <dt>Mehrverbrauch verschobener Energie</dt><dd>${num(o.wp_mehrverbrauch_prozent, 0)} %</dd>
+    <dt>Mindest-Preisabstand</dt><dd>${num(o.wp_mindest_spread_ct)} ct/kWh</dd>`;
+}
+
+// ------------------------------------------------------------------ Tagesdetail
 async function loadDay() {
-  const day = document.getElementById("day").value;
-  if (!day) return;
-  const r = await fetch("api/day?date=" + day).then(r => r.json());
-  const R = r.rows || [];
-  chart("cDay", { type: "bar", data: { labels: R.map(x => new Date(x.t * 1000).getHours() + " Uhr"), datasets: [
-    { type: "line", label: "Dyn. Preis (ct/kWh)", data: R.map(x => x.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2, stepped: true },
-    { label: "Bezug (kWh)", data: R.map(x => x.imp), backgroundColor: css("--dyn") },
-    { label: "Bezug verschoben (kWh)", data: R.map(x => x.opt), backgroundColor: css("--opt") },
-    { label: "Einspeisung (kWh)", data: R.map(x => -x.exp), backgroundColor: css("--fix") } ] },
-    options: { scales: { x: {}, y: { title: { display: true, text: "kWh", color: css("--muted") } },
-      y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " ct" } } } } });
+  const el = document.querySelector(`#view-${VIEW} input.day`);
+  if (!el || !el.value || !DATA) return;
+  const r = await fetch("api/day?date=" + el.value).then(r => r.json());
+  const R = r.rows || [], labels = R.map(x => new Date(x.t * 1000).getHours() + " Uhr");
   const sum = k => R.reduce((a, x) => a + x[k], 0);
-  document.getElementById("dayNote").textContent = R.length
-    ? `Festpreis ${eur(sum("fix"))} · dynamisch ${eur(sum("dyn"))} · mit Verschiebung ${eur(sum("dyn_opt"))} · Bezug ${num(sum("imp"), 1)} kWh`
-    : "Keine Daten für diesen Tag.";
+  const priceLine = { type: "line", label: "Dyn. Preis (ct/kWh)", data: R.map(x => x.p), borderColor: css("--price"), yAxisID: "y1", pointRadius: 0, borderWidth: 2, stepped: true };
+  const opts = { scales: { x: {}, y: kwhAxis(), y1: ctAxis } };
+  if (VIEW === "wp") {
+    chart("cWpDay", { type: "bar", data: { labels, datasets: [priceLine,
+      { label: "WP-Netzbezug original (kWh)", data: R.map(x => x.wp_grid), backgroundColor: css("--fix") },
+      { label: "WP-Netzbezug verschoben (kWh)", data: R.map(x => x.wp_grid_new), backgroundColor: css("--wp") } ] }, options: opts });
+    document.getElementById("wpDayNote").textContent = R.length
+      ? `WP-Netzbezug ${num(sum("wp_grid"), 1)} kWh · dynamisch ${eur(sum("dyn"))} · mit WP-Verschiebung ${eur(sum("dyn_wp"))} · Festpreis ${eur(sum("fix"))}`
+      : "Keine Daten für diesen Tag.";
+  } else {
+    chart("cDay", { type: "bar", data: { labels, datasets: [priceLine,
+      { label: "Bezug (kWh)", data: R.map(x => x.imp), backgroundColor: css("--dyn") },
+      { label: "Bezug E-Auto/Akku (kWh)", data: R.map(x => x.opt), backgroundColor: css("--opt") },
+      { label: "Einspeisung (kWh)", data: R.map(x => -x.exp), backgroundColor: css("--fix") } ] }, options: opts });
+    document.getElementById("dayNote").textContent = R.length
+      ? `Festpreis ${eur(sum("fix"))} · dynamisch ${eur(sum("dyn"))} · mit E-Auto/Akku ${eur(sum("dyn_opt"))} · Bezug ${num(sum("imp"), 1)} kWh`
+      : "Keine Daten für diesen Tag.";
+  }
 }
 
-function shiftDay(n) {
-  const el = document.getElementById("day"); if (!el.value) return;
-  const d = new Date(el.value + "T12:00:00"); d.setDate(d.getDate() + n);
+document.querySelectorAll("input.day").forEach(el => el.addEventListener("change", () => {
+  document.querySelectorAll("input.day").forEach(o => o.value = el.value); loadDay();
+}));
+document.querySelectorAll("button[data-shift]").forEach(btn => btn.onclick = () => {
+  const el = document.querySelector(`#view-${VIEW} input.day`); if (!el.value) return;
+  const d = new Date(el.value + "T12:00:00"); d.setDate(d.getDate() + +btn.dataset.shift);
   const v = d.toISOString().slice(0, 10);
-  if ((!el.min || v >= el.min) && (!el.max || v <= el.max)) { el.value = v; loadDay(); }
-}
+  if ((!el.min || v >= el.min) && (!el.max || v <= el.max)) { document.querySelectorAll("input.day").forEach(o => o.value = v); loadDay(); }
+});
 
 async function load() {
   try { render(await fetch("api/data").then(r => r.json())); }
   catch (e) { const err = document.getElementById("error"); err.hidden = false; err.textContent = "Daten konnten nicht geladen werden: " + e; }
 }
-
-document.getElementById("day").addEventListener("change", loadDay);
-document.getElementById("prevDay").onclick = () => shiftDay(-1);
-document.getElementById("nextDay").onclick = () => shiftDay(1);
 document.getElementById("refresh").onclick = async () => {
   await fetch("api/refresh", { method: "POST" });
   document.getElementById("status").textContent = "Berechnung läuft …";
-  setTimeout(load, 8000);
+  setTimeout(load, 10000);
 };
 load();
 setInterval(load, 15 * 60 * 1000);

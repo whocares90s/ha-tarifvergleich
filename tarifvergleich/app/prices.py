@@ -104,10 +104,19 @@ async def refresh(store: PriceStore, session: aiohttp.ClientSession, start_date:
     while day <= until:
         chunk_end = min(day + dt.timedelta(days=30), until)
         points, src = [], ""
-        try:
-            points, src = await _energy_charts(session, day, chunk_end), "energy-charts"
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as err:
-            _LOG.warning("Energy-Charts %s–%s fehlgeschlagen (%s) – versuche aWATTar", day, chunk_end, err)
+        for attempt in range(3):
+            try:
+                points, src = await _energy_charts(session, day, chunk_end), "energy-charts"
+                break
+            except aiohttp.ClientResponseError as err:
+                if err.status == 429 and attempt < 2:
+                    await asyncio.sleep(10 * (attempt + 1))  # Rate-Limit: kurz warten
+                    continue
+                _LOG.warning("Energy-Charts %s–%s fehlgeschlagen (%s) – versuche aWATTar", day, chunk_end, err)
+                break
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as err:
+                _LOG.warning("Energy-Charts %s–%s fehlgeschlagen (%s) – versuche aWATTar", day, chunk_end, err)
+                break
         if not points:
             try:
                 points, src = await _awattar(session, day, chunk_end), "awattar"

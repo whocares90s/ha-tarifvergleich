@@ -213,20 +213,92 @@ def battery_arbitrage(hours, imp, soc, price, o):
     }
 
 
+def shift_heatpump(hours, imp, wp, price, o):
+    """Wärmepumpe: ein Anteil ihres Netzbezugs jeder Stunde darf innerhalb von
+    ±Fenster Stunden in billigere Stunden wandern (Vorheizen/Nachlaufen über die
+    thermische Speichermasse). Verschobene Energie kostet einen Mehrverbrauch
+    (schlechtere JAZ bei höherer Vorlauftemperatur). Teuerste Stunden zuerst."""
+    n = len(hours)
+    frac = float(o["wp_anteil_verschiebbar"])
+    win = int(o["wp_fenster_h"])
+    maxkw = float(o["wp_max_kw"])
+    pen = 1.0 + float(o["wp_mehrverbrauch_prozent"]) / 100.0
+    spread = float(o["wp_mindest_spread_ct"])
+
+    new = list(imp)
+    # Netzanteil der WP: WP-Verbrauch, soweit in der Stunde Netzbezug da war
+    grid = [max(0.0, min(wp[h], imp[h])) for h in range(n)]
+    grid_new = list(grid)
+    load = [max(0.0, w) for w in wp]
+    moved = extra = saved_ct = 0.0
+
+    order = sorted((h for h in range(n) if price[h] is not None and grid[h] > 0.01), key=lambda h: -price[h])
+    for j in order:
+        m = frac * grid[j]
+        cands = [
+            i for i in range(max(0, j - win), min(n, j + win + 1))
+            if i != j and price[i] is not None and price[i] * pen + spread <= price[j]
+        ]
+        cands.sort(key=lambda i: price[i])
+        for i in cands:
+            if m <= 0.01:
+                break
+            cap = maxkw - load[i]
+            if cap <= 0.01:
+                continue
+            x = min(m, cap / pen)
+            load[i] += x * pen
+            load[j] -= x
+            new[i] += x * pen
+            new[j] -= x
+            grid_new[i] += x * pen
+            grid_new[j] -= x
+            m -= x
+            moved += x
+            extra += x * (pen - 1.0)
+            saved_ct += x * (price[j] - price[i] * pen)
+
+    info = {
+        "wp_netz_kwh": sum(grid),
+        "kwh_verschoben": moved,
+        "kwh_mehrverbrauch": extra,
+        "ersparnis_eur": saved_ct / 100.0,
+    }
+    return new, grid, grid_new, info
+
+
 # --------------------------------------------------------------------------- Simulation
-def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo) -> dict:
-    """hours: Liste Unix-Stundenbeginn; imp/exp/ev: kWh je Stunde; soc: % oder None;
+EMPTY_EV = {"sitzungen": 0, "kwh_verschoben": 0.0, "ersparnis_eur": 0.0}
+EMPTY_BAT = {"kwh_netzladung": 0.0, "kwh_entladen": 0.0, "vollzyklen": 0.0, "ersparnis_eur": 0.0}
+
+
+def _ev_and_battery(hours, base, ev, soc, price, o, tz):
+    out, ev_info, bat_info = list(base), dict(EMPTY_EV), dict(EMPTY_BAT)
+    if o.get("ev_verschiebung") and any(v > 0 for v in ev):
+        out, ev_info = shift_ev(hours, out, ev, price, o, tz)
+    if o.get("akku_arbitrage") and any(s is not None for s in soc):
+        out, bat_info = battery_arbitrage(hours, out, soc, price, o)
+    return out, ev_info, bat_info
+
+
+def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None) -> dict:
+    """hours: Liste Unix-Stundenbeginn; imp/exp/ev/wp: kWh je Stunde; soc: % oder None;
     spot: €/MWh oder None."""
     n = len(hours)
+    wp = wp if wp is not None else [0.0] * n
     price = [dyn_price_ct(s, o) if s is not None else None for s in spot]
 
-    opt = list(imp)
-    ev_info = {"sitzungen": 0, "kwh_verschoben": 0.0, "ersparnis_eur": 0.0}
-    bat_info = {"kwh_netzladung": 0.0, "kwh_entladen": 0.0, "vollzyklen": 0.0, "ersparnis_eur": 0.0}
-    if o.get("ev_verschiebung") and any(v > 0 for v in ev):
-        opt, ev_info = shift_ev(hours, opt, ev, price, o, tz)
-    if o.get("akku_arbitrage") and any(s is not None for s in soc):
-        opt, bat_info = battery_arbitrage(hours, opt, soc, price, o)
+    # Szenario A: E-Auto + Akku (unverändert gegenüber v0.1)
+    opt, ev_info, bat_info = _ev_and_battery(hours, imp, ev, soc, price, o, tz)
+
+    # Szenario B: nur Wärmepumpe – getrennt, damit der Effekt isoliert sichtbar ist
+    imp_wp, wp_grid, wp_grid_new = list(imp), [0.0] * n, [0.0] * n
+    wp_info = {"wp_netz_kwh": 0.0, "kwh_verschoben": 0.0, "kwh_mehrverbrauch": 0.0, "ersparnis_eur": 0.0}
+    if o.get("wp_verschiebung") and any(v > 0 for v in wp):
+        imp_wp, wp_grid, wp_grid_new, wp_info = shift_heatpump(hours, imp, wp, price, o)
+
+    # Szenario C: alle Maßnahmen (erst WP, dann E-Auto + Akku auf dem Rest)
+    imp_all, all_ev, all_bat = _ev_and_battery(hours, imp_wp, ev, soc, price, o, tz)
 
     fix_ct = float(o["festpreis_arbeitspreis_ct_brutto"])
     fix_h = fix_fixed_eur_year(o) / HOURS_PER_YEAR
@@ -254,6 +326,12 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo) -> dict:
                 "dyn": imp[k] * p / 100.0 + dyn_h,
                 "dyn_opt": opt[k] * p / 100.0 + dyn_h,
                 "feed": exp[k] * feed_ct / 100.0,
+                "wp_grid": wp_grid[k],
+                "wp_grid_new": wp_grid_new[k],
+                "imp_wp": imp_wp[k],
+                "dyn_wp": imp_wp[k] * p / 100.0 + dyn_h,
+                "imp_all": imp_all[k],
+                "dyn_all": imp_all[k] * p / 100.0 + dyn_h,
             }
         )
 
@@ -262,7 +340,13 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo) -> dict:
         "missing_hours": missing,
         "ev": ev_info,
         "akku": bat_info,
+        "wp": wp_info,
+        "alle": {"ev": all_ev, "akku": all_bat},
     }
+
+
+SUM_KEYS = ("imp", "opt", "exp", "fix", "dyn", "dyn_opt", "feed",
+            "wp_grid", "wp_grid_new", "imp_wp", "dyn_wp", "imp_all", "dyn_all")
 
 
 def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
@@ -271,26 +355,22 @@ def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
     for r in rows:
         local = dt.datetime.fromtimestamp(r["t"], tz)
         k = local.strftime("%Y-%m-%d") if key == "day" else local.strftime("%Y-%m")
-        a = out.setdefault(
-            k,
-            {"key": k, "imp": 0.0, "opt": 0.0, "exp": 0.0, "fix": 0.0, "dyn": 0.0, "dyn_opt": 0.0,
-             "feed": 0.0, "pw": 0.0, "spot_sum": 0.0, "hours": 0},
-        )
-        a["imp"] += r["imp"]
-        a["opt"] += r["opt"]
-        a["exp"] += r["exp"]
-        a["fix"] += r["fix"]
-        a["dyn"] += r["dyn"]
-        a["dyn_opt"] += r["dyn_opt"]
-        a["feed"] += r["feed"]
+        a = out.get(k)
+        if a is None:
+            a = out[k] = {"key": k, "pw": 0.0, "pw_wp": 0.0, "spot_sum": 0.0, "hours": 0,
+                          **{s: 0.0 for s in SUM_KEYS}}
+        for s in SUM_KEYS:
+            a[s] += r[s]
         a["pw"] += r["imp"] * r["p"]
+        a["pw_wp"] += r["wp_grid"] * r["p"]
         a["spot_sum"] += r["spot"]
         a["hours"] += 1
     result = []
     for a in out.values():
         a["preis_gewichtet_ct"] = a["pw"] / a["imp"] if a["imp"] > 0.01 else None
+        a["preis_wp_ct"] = a["pw_wp"] / a["wp_grid"] if a["wp_grid"] > 0.01 else None
         a["spot_mittel_ct"] = a["spot_sum"] / a["hours"] if a["hours"] else None
-        del a["pw"], a["spot_sum"]
+        del a["pw"], a["pw_wp"], a["spot_sum"]
         result.append(a)
     result.sort(key=lambda x: x["key"])
     return result
@@ -298,17 +378,15 @@ def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
 
 def hour_profile(rows: list[dict], tz: ZoneInfo) -> list[dict]:
     """Mittlerer Preis und mittlerer Bezug je Stunde des Tages."""
-    acc = [{"h": h, "p": 0.0, "imp": 0.0, "opt": 0.0, "n": 0} for h in range(24)]
+    keys = ("p", "imp", "opt", "wp_grid", "wp_grid_new")
+    acc = [{"h": h, "n": 0, **{k: 0.0 for k in keys}} for h in range(24)]
     for r in rows:
-        h = dt.datetime.fromtimestamp(r["t"], tz).hour
-        a = acc[h]
-        a["p"] += r["p"]
-        a["imp"] += r["imp"]
-        a["opt"] += r["opt"]
+        a = acc[dt.datetime.fromtimestamp(r["t"], tz).hour]
+        for k in keys:
+            a[k] += r[k]
         a["n"] += 1
     for a in acc:
         if a["n"]:
-            a["p"] /= a["n"]
-            a["imp"] /= a["n"]
-            a["opt"] /= a["n"]
+            for k in keys:
+                a[k] /= a["n"]
     return acc

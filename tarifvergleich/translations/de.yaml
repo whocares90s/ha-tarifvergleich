@@ -62,5 +62,22 @@ configuration:
   akku_mindest_spread_ct:
     name: Akku Mindest-Preisabstand (ct/kWh)
     description: Netzladung nur, wenn späterer Preis × Wirkungsgrad mindestens so viel teurer ist (deckt Verschleiß ab).
+  wp_verschiebung:
+    name: Szenario Wärmepumpen-Verschiebung
+    description: Eigenes Szenario und eigene Ansicht, getrennt von E-Auto/Akku.
+  wp_statistik:
+    name: Statistik Wärmepumpe Energie (kWh)
+  wp_anteil_verschiebbar:
+    name: Verschiebbarer Anteil des WP-Netzbezugs (0–1)
+    description: z. B. 0.4 = 40 % jeder Stunde können vor- oder nachgeholt werden (Fußbodenheizung/Pufferspeicher).
+  wp_fenster_h:
+    name: Verschiebefenster (± Stunden)
+  wp_max_kw:
+    name: Max. elektrische Leistung WP (kW)
+  wp_mehrverbrauch_prozent:
+    name: Mehrverbrauch verschobener Energie (%)
+    description: Höhere Vorlauftemperatur beim Vorheizen senkt die Effizienz.
+  wp_mindest_spread_ct:
+    name: WP Mindest-Preisabstand (ct/kWh)
   log_level:
     name: Log-Level

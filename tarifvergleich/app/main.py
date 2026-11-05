@@ -25,7 +25,15 @@ STAT_IDS = {
     "fix": ("tarifvergleich:kosten_festpreis", "Tarifvergleich Kosten Festpreis"),
     "dyn": ("tarifvergleich:kosten_dynamisch", "Tarifvergleich Kosten dynamisch"),
     "dyn_opt": ("tarifvergleich:kosten_dynamisch_optimiert", "Tarifvergleich Kosten dynamisch + Verschiebung"),
+    "dyn_wp": ("tarifvergleich:kosten_dynamisch_wp", "Tarifvergleich Kosten dynamisch + WP-Verschiebung"),
+    "dyn_all": ("tarifvergleich:kosten_dynamisch_alle", "Tarifvergleich Kosten dynamisch + alle Maßnahmen"),
 }
+OPTION_KEYS = (
+    "startdatum", "ev_verschiebung", "akku_arbitrage", "ev_max_kw", "ev_abend_ab_uhr", "ev_fertig_bis_uhr",
+    "akku_kapazitaet_kwh", "akku_max_netzladeleistung_kw", "akku_wirkungsgrad", "akku_mindest_spread_ct",
+    "einspeiseverguetung_ct", "wp_verschiebung", "wp_anteil_verschiebbar", "wp_fenster_h", "wp_max_kw",
+    "wp_mehrverbrauch_prozent", "wp_mindest_spread_ct",
+)
 PRICE_STAT = ("tarifvergleich:preis_dynamisch", "Tarifvergleich Preis dynamisch")
 
 
@@ -79,7 +87,10 @@ class Engine:
         await prices.refresh(self.store, self.session, start_date)
 
         ev_ids = list(o.get("ev_statistiken") or []) if o.get("ev_verschiebung") else []
+        wp_id = o.get("wp_statistik") if o.get("wp_verschiebung") else ""
         energy_ids = [o["statistik_netzbezug"], o["statistik_einspeisung"], *ev_ids]
+        if wp_id:
+            energy_ids.append(wp_id)
         stats = await self.ha.statistics(energy_ids, start, end, ["change"], {"energy": "kWh"})
         soc_stats = {}
         if o.get("akku_arbitrage") and o.get("akku_soc_statistik"):
@@ -91,6 +102,7 @@ class Engine:
         exp_d = _series(stats, o["statistik_einspeisung"], "change")
         ev_ds = [_series(stats, sid, "change") for sid in ev_ids]
         soc_d = _series(soc_stats, o.get("akku_soc_statistik", ""), "mean")
+        wp_d = _series(stats, wp_id, "change") if wp_id else {}
 
         first = max(int(start.timestamp()), min(imp_d))
         hours = list(range(first, int(end.timestamp()), 3600))
@@ -102,8 +114,9 @@ class Engine:
         ev = [sum(max(0.0, d.get(h, 0.0)) for d in ev_ds) for h in hours]
         soc = [soc_d.get(h) for h in hours]
         spot = [spot_d.get(h) for h in hours]
+        wp = [max(0.0, wp_d.get(h, 0.0)) for h in hours]
 
-        res = sim.simulate(hours, imp, exp, ev, soc, spot, o, TZ)
+        res = sim.simulate(hours, imp, exp, ev, soc, spot, o, TZ, wp=wp)
         rows = res["rows"]
         self.result = res
         self.daily = sim.aggregate(rows, TZ, "day")
@@ -119,9 +132,11 @@ class Engine:
 
     def _summary(self, res: dict, hours: list[int]) -> dict:
         rows = res["rows"]
-        tot = {k: sum(r[k] for r in rows) for k in ("imp", "opt", "exp", "fix", "dyn", "dyn_opt", "feed")}
+        tot = {k: sum(r[k] for r in rows) for k in sim.SUM_KEYS}
         pw = sum(r["imp"] * r["p"] for r in rows)
         pw_opt = sum(r["opt"] * r["p"] for r in rows)
+        pw_wp = sum(r["wp_grid"] * r["p"] for r in rows)
+        pw_wp_new = sum(r["wp_grid_new"] * r["p"] for r in rows)
         month_key = dt.datetime.now(TZ).strftime("%Y-%m")
         cur = next((m for m in self.monthly if m["key"] == month_key), None)
         return {
@@ -134,9 +149,16 @@ class Engine:
             "ersparnis_opt": tot["fix"] - tot["dyn_opt"],
             "preis_gewichtet_ct": pw / tot["imp"] if tot["imp"] > 0 else None,
             "preis_gewichtet_opt_ct": pw_opt / tot["opt"] if tot["opt"] > 0 else None,
+            "ersparnis_wp": tot["fix"] - tot["dyn_wp"],
+            "ersparnis_alle": tot["fix"] - tot["dyn_all"],
+            "wp_effekt": tot["dyn"] - tot["dyn_wp"],
+            "preis_wp_ct": pw_wp / tot["wp_grid"] if tot["wp_grid"] > 0 else None,
+            "preis_wp_neu_ct": pw_wp_new / tot["wp_grid_new"] if tot["wp_grid_new"] > 0 else None,
             "monat": cur,
             "ev": res["ev"],
             "akku": res["akku"],
+            "wp": res["wp"],
+            "alle": res["alle"],
         }
 
     # ------------------------------------------------------------------ Ausgabe an HA
@@ -174,6 +196,19 @@ class Engine:
         await self.ha.set_state("sensor.tarifvergleich_ersparnis_optimiert", round(s["ersparnis_opt"], 2),
                                 money("Tarifvergleich Ersparnis dynamisch + Verschiebung", s["ersparnis_opt"],
                                       "mdi:piggy-bank-outline"))
+        if self.opts.get("wp_verschiebung"):
+            await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_wp", round(s["dyn_wp"], 2),
+                                    money("Tarifvergleich Kosten dynamisch + WP-Verschiebung", 0, "mdi:heat-pump",
+                                          {"wp_netzbezug_kwh": _r(s["wp_grid"]),
+                                           "wp_kwh_verschoben": _r(s["wp"]["kwh_verschoben"]),
+                                           "wp_preis_ct": _r(s["preis_wp_ct"]),
+                                           "wp_preis_verschoben_ct": _r(s["preis_wp_neu_ct"])}))
+            await self.ha.set_state("sensor.tarifvergleich_ersparnis_wp", round(s["wp_effekt"], 2),
+                                    money("Tarifvergleich Ersparnis durch WP-Verschiebung", 0, "mdi:heat-pump-outline",
+                                          {"ersparnis_ggue_festpreis": round(s["ersparnis_wp"], 2)}))
+            await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_alle", round(s["dyn_all"], 2),
+                                    money("Tarifvergleich Kosten dynamisch + alle Maßnahmen", 0, "mdi:cash-check",
+                                          {"ersparnis_ggue_festpreis": round(s["ersparnis_alle"], 2)}))
         m = s.get("monat")
         if m:
             await self.ha.set_state("sensor.tarifvergleich_ersparnis_monat", round(m["fix"] - m["dyn"], 2),
@@ -259,11 +294,7 @@ def build_web(engine: Engine) -> web.Application:
                 "profile": engine.profile,
                 "future": engine.future_prices(),
                 "tarif": sim.breakdown(engine.opts),
-                "optionen": {k: engine.opts[k] for k in ("startdatum", "ev_verschiebung", "akku_arbitrage",
-                                                          "ev_max_kw", "ev_abend_ab_uhr", "ev_fertig_bis_uhr",
-                                                          "akku_kapazitaet_kwh", "akku_max_netzladeleistung_kw",
-                                                          "akku_wirkungsgrad", "akku_mindest_spread_ct",
-                                                          "einspeiseverguetung_ct")},
+                "optionen": {k: engine.opts.get(k) for k in OPTION_KEYS},
                 "status": {"letzter_lauf": engine.last_run, "fehler": engine.last_error,
                            "laeuft": engine.busy.locked()},
             },
