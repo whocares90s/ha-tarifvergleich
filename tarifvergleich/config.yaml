@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.3.0"
+version: "0.3.1"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -21,7 +21,7 @@ options:
   pv_statistiken:
     - sensor.deye_sunsynk_sol_ark_3_phase_pv_energy
     - sensor.shelly_garagenpv_energy
-  pv_wenig_kwh_tag: 5.0
+  pv_wenig_kwh_tag: 10.0
   festpreis_arbeitspreis_ct_brutto: 29.17
   festpreis_grundpreis_eur_jahr_brutto: 197.09
   mwst_prozent: 19

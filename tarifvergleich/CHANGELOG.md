@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Akku-Ersparnis wird dem Ladetag zugeordnet (vorher Verzerrung, wenn über Mitternacht entladen wurde)
+- Standard-Grenze „PV-armer Tag“ auf 10 kWh
+
 ## 0.3.0
 
 - Ansichten neu: **Übersicht** (Festpreis vs. dynamisch wie gemessen) und **Lastverschiebung** (E-Auto, Wärmepumpe, Hausakku, alle kombiniert)

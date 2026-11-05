@@ -196,6 +196,7 @@ def battery_arbitrage(hours, imp, soc, price, o):
 
     charged = [0.0] * n
     discharged = [0.0] * n
+    gain_at = [0.0] * n  # Ersparnis in EUR, der Ladestunde zugeordnet
     extra = [0.0] * n
     total_in = 0.0
     saved_ct = 0.0
@@ -218,6 +219,7 @@ def battery_arbitrage(hours, imp, soc, price, o):
             extra[h] += x
         total_in += x
         saved_ct += x * gain
+        gain_at[i] += x * gain / 100.0
 
     new = [imp[h] + charged[h] - discharged[h] for h in range(n)]
     return new, {
@@ -225,7 +227,7 @@ def battery_arbitrage(hours, imp, soc, price, o):
         "kwh_entladen": total_in * eta,
         "vollzyklen": total_in / cap if cap else 0.0,
         "ersparnis_eur": saved_ct / 100.0,
-    }, charged, discharged
+    }, charged, gain_at
 
 
 # --------------------------------------------------------------------------- Wärmepumpe
@@ -348,9 +350,9 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=N
     else:
         imp_wp, wp_grid, wp_grid_new, wp_ww, wp_info = imp, zeros, zeros, zeros, dict(EMPTY_WP)
     if have["akku"]:
-        imp_bat, bat_info, bat_in, bat_out = battery_arbitrage(hours, imp, soc, price, o)
+        imp_bat, bat_info, bat_in, bat_gain = battery_arbitrage(hours, imp, soc, price, o)
     else:
-        imp_bat, bat_info, bat_in, bat_out = imp, dict(EMPTY_BAT), zeros, zeros
+        imp_bat, bat_info, bat_in, bat_gain = imp, dict(EMPTY_BAT), zeros, zeros
 
     # --- alle Maßnahmen kombiniert: erst WP, dann E-Auto, dann Akku auf dem Rest
     imp_all = imp_wp
@@ -395,7 +397,7 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=N
                 "wp_grid_new": wp_grid_new[k],
                 "wp_ww": wp_ww[k],
                 "bat_in": bat_in[k],
-                "bat_out": bat_out[k],
+                "bat_gain": bat_gain[k],
             }
         )
 
@@ -411,7 +413,7 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=N
 
 
 SUM_KEYS = ("imp", "exp", "pv", "ev", "fix", "dyn", "dyn_ev", "dyn_wp", "dyn_bat", "dyn_all", "imp_all",
-            "feed", "wp_grid", "wp_grid_new", "wp_ww", "bat_in", "bat_out")
+            "feed", "wp_grid", "wp_grid_new", "wp_ww", "bat_in", "bat_gain")
 
 
 def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
@@ -451,7 +453,7 @@ def pv_poor_days(daily: list[dict], threshold_kwh: float) -> dict:
         "tage_pv_arm": len(poor),
         "tage_mit_netzladung": len(with_charge),
         "kwh_netzladung": sum(d["bat_in"] for d in poor),
-        "ersparnis_eur": sum(d["dyn"] - d["dyn_bat"] for d in poor),
+        "ersparnis_eur": sum(d["bat_gain"] for d in poor),  # dem Ladetag zugeordnet
         "kwh_netzladung_gesamt": sum(d["bat_in"] for d in daily),
     }
 
