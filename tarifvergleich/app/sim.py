@@ -442,12 +442,15 @@ SUM_KEYS = ("imp", "exp", "pv", "ev", "fix", "dyn", "dyn_ev", "dyn_wp", "dyn_bat
             "feed", "wp_grid", "wp_grid_new", "wp_ww", "bat_in", "bat_gain")
 
 
+KEY_FMT = {"hour": "%Y-%m-%d %H", "day": "%Y-%m-%d", "month": "%Y-%m"}
+
+
 def aggregate(rows: list[dict], tz: ZoneInfo, key: str) -> list[dict]:
-    """key: 'day' oder 'month' (lokale Zeit)."""
+    """key: 'hour', 'day' oder 'month' (lokale Zeit)."""
     out: dict[str, dict] = {}
+    fmt = KEY_FMT[key]
     for r in rows:
-        local = dt.datetime.fromtimestamp(r["t"], tz)
-        k = local.strftime("%Y-%m-%d") if key == "day" else local.strftime("%Y-%m")
+        k = dt.datetime.fromtimestamp(r["t"], tz).strftime(fmt)
         a = out.get(k)
         if a is None:
             a = out[k] = {"key": k, "pw": 0.0, "pw_wp": 0.0, "spot_sum": 0.0, "hours": 0,

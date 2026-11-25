@@ -312,6 +312,57 @@ class Engine:
         state.update(speicher_sig=sig, speicher_first_t=rows[0]["t"])
         _write_state(state)
 
+    def range_view(self, von: dt.date, bis: dt.date) -> dict:
+        """Kennzahlen, Zeitreihen und Tagesprofil für einen Datumsbereich (inkl. bis)."""
+        res = self.result or {}
+        all_rows = res.get("rows", [])
+        start = int(dt.datetime.combine(von, dt.time(0), TZ).timestamp())
+        end = int(dt.datetime.combine(bis + dt.timedelta(days=1), dt.time(0), TZ).timestamp())
+        rows = [r for r in all_rows if start <= r["t"] < end]
+        days = (bis - von).days + 1
+        gran = "hour" if days <= 1 else ("day" if days <= 62 else "month")
+        full = bool(rows) and len(rows) == len(all_rows)
+        if full:
+            summary = dict(self.summary)
+        else:
+            summary = self._totals(rows)
+            summary.update(vorhanden=res.get("vorhanden", {}), stunden_ohne_preis=0, ev=None, wp=None,
+                           alle=None, pv_arm=None,
+                           akku={"kwh_netzladung": summary["bat_in"], "ersparnis_eur": summary["bat_gain"],
+                                 "vollzyklen": None, "kwh_entladen": None})
+        summary["filter_von"], summary["filter_bis"], summary["gesamt"] = von.isoformat(), bis.isoformat(), full
+        return {
+            "summary": summary,
+            "granularitaet": gran,
+            "buckets": sim.aggregate(rows, TZ, gran),
+            "daily": sim.aggregate(rows, TZ, "hour" if gran == "hour" else "day"),
+            "profile": sim.hour_profile(rows, TZ),
+        }
+
+    @staticmethod
+    def _totals(rows: list[dict]) -> dict:
+        tot = {k: sum(r[k] for r in rows) for k in sim.SUM_KEYS}
+        pw = sum(r["imp"] * r["p"] for r in rows)
+        pw_all = sum(r["imp_all"] * r["p"] for r in rows)
+        pw_wp = sum(r["wp_grid"] * r["p"] for r in rows)
+        pw_wp_new = sum(r["wp_grid_new"] * r["p"] for r in rows)
+        return {
+            **tot,
+            "von": dt.datetime.fromtimestamp(rows[0]["t"], TZ).isoformat() if rows else None,
+            "bis": dt.datetime.fromtimestamp(rows[-1]["t"] + 3600, TZ).isoformat() if rows else None,
+            "stunden": len(rows),
+            "ersparnis": tot["fix"] - tot["dyn"],
+            "ersparnis_alle": tot["fix"] - tot["dyn_all"],
+            "effekt_ev": tot["dyn"] - tot["dyn_ev"],
+            "effekt_wp": tot["dyn"] - tot["dyn_wp"],
+            "effekt_akku": tot["dyn"] - tot["dyn_bat"],
+            "effekt_alle": tot["dyn"] - tot["dyn_all"],
+            "preis_gewichtet_ct": pw / tot["imp"] if tot["imp"] > 0 else None,
+            "preis_gewichtet_alle_ct": pw_all / tot["imp_all"] if tot["imp_all"] > 0 else None,
+            "preis_wp_ct": pw_wp / tot["wp_grid"] if tot["wp_grid"] > 0 else None,
+            "preis_wp_neu_ct": pw_wp_new / tot["wp_grid_new"] if tot["wp_grid_new"] > 0 else None,
+        }
+
     def _summary(self, res: dict, has_pv: bool) -> dict:
         rows = res["rows"]
         tot = {k: sum(r[k] for r in rows) for k in sim.SUM_KEYS}
@@ -518,6 +569,17 @@ def build_web(engine: Engine) -> web.Application:
             return web.json_response({"error": str(err)}, status=500)
         return web.json_response(rep)
 
+    async def api_range(req):
+        try:
+            von = dt.date.fromisoformat(req.query.get("von", ""))
+            bis = dt.date.fromisoformat(req.query.get("bis", ""))
+        except ValueError:
+            return web.json_response({"error": "von/bis=YYYY-MM-DD erwartet"}, status=400)
+        if bis < von:
+            von, bis = bis, von
+        return web.json_response(engine.range_view(von, bis), dumps=lambda o: json.dumps(o, default=str))
+
+    app.router.add_get("/api/range", api_range)
     app.router.add_post("/api/migrate", api_migrate)
     app.router.add_get("/", index)
     app.router.add_get("/api/data", api_data)

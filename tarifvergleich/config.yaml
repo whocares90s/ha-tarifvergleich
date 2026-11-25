@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.6.0"
+version: "0.7.0"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich

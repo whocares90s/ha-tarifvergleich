@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Zeitfilter für Übersicht und Lastverschiebung: Gesamt, Jahr, Monat, Tag und freier Zeitraum, mit Blättern
+- Auflösung passt sich an (Monate / Tage / Stunden), Kennzahlen und Tabellen gelten für den gewählten Zeitraum
+- Neuer Endpunkt `GET /api/range?von=YYYY-MM-DD&bis=YYYY-MM-DD`
+
 ## 0.6.0
 
 - Eine Datenquelle: alle Auswertungen basieren auf dem eBZ (Optionen `speicher_statistik_*` entfernt)

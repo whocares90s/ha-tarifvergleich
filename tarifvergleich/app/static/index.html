@@ -63,6 +63,15 @@
   .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
   .intro { margin: 0 0 12px; color: var(--muted); max-width: 85ch; }
   section { margin-top: 12px; }
+  .filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: -4px 0 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--card); padding: 5px 12px; color: var(--muted); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--dyn); color: #fff; }
+  .filter select, .filter input { font: inherit; color: var(--text); background: var(--card);
+                                  border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  #fCtl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -81,6 +90,14 @@
     <button role="tab" data-view="storage" aria-selected="false" id="tabStorage" hidden>PV &amp; Speicher</button>
   </nav>
 
+  <div class="filter" id="filterBar" hidden>
+    <div class="seg" role="group" aria-label="Zeitraum">
+      <button data-mode="all">Gesamt</button><button data-mode="year">Jahr</button><button data-mode="month">Monat</button><button data-mode="day">Tag</button><button data-mode="range">Zeitraum</button>
+    </div>
+    <span id="fCtl"></span>
+    <span class="muted" id="fLabel"></span>
+  </div>
+
   <div id="error" class="card err" hidden></div>
 
   <!-- ===================================================== Übersicht -->
@@ -88,7 +105,7 @@
     <div class="grid kpis" id="kpis"></div>
 
     <section class="grid two">
-      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cMonthly"></canvas></div></div>
+      <div class="card"><h2 data-gt="Kosten je {p}">Kosten je Monat</h2><div class="chart"><canvas id="cMonthly"></canvas></div></div>
       <div class="card"><h2>Kumulierte Ersparnis gegenüber Festpreis</h2><div class="chart"><canvas id="cCum"></canvas></div></div>
     </section>
 
@@ -105,7 +122,7 @@
     </section>
 
     <section class="card">
-      <h2>Monatsübersicht</h2>
+      <h2 data-gt="{P}übersicht">Monatsübersicht</h2>
       <div class="scroll"><table id="tMonthly"></table></div>
     </section>
 
@@ -124,8 +141,8 @@
     <div class="grid kpis" id="shiftKpis"></div>
 
     <section class="grid two">
-      <div class="card"><h2>Kosten je Monat</h2><div class="chart"><canvas id="cShiftMonthly"></canvas></div></div>
-      <div class="card"><h2>Ersparnis je Monat nach Maßnahme</h2><div class="chart"><canvas id="cShiftEffect"></canvas></div></div>
+      <div class="card"><h2 data-gt="Kosten je {p}">Kosten je Monat</h2><div class="chart"><canvas id="cShiftMonthly"></canvas></div></div>
+      <div class="card"><h2 data-gt="Ersparnis je {p} nach Maßnahme">Ersparnis je Monat nach Maßnahme</h2><div class="chart"><canvas id="cShiftEffect"></canvas></div></div>
     </section>
 
     <section class="card">
@@ -141,7 +158,7 @@
     </section>
 
     <section class="card">
-      <h2>Monatsübersicht Lastverschiebung</h2>
+      <h2 data-gt="{P}übersicht Lastverschiebung">Monatsübersicht Lastverschiebung</h2>
       <div class="scroll"><table id="tShift"></table></div>
     </section>
 
@@ -242,6 +259,7 @@ function showView(v) {
     try { localStorage.setItem("tv-view", v); } catch (e) {}
     document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
     document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
+    document.getElementById("filterBar").hidden = true;
     if (DATA) renderStorage(DATA);
     return;
   }
@@ -249,9 +267,118 @@ function showView(v) {
   try { localStorage.setItem("tv-view", v); } catch (e) {}
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
   document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
-  if (DATA && DATA.summary && DATA.summary.stunden) { (v === "shift" ? renderShift : renderOverview)(DATA); loadDay(); }
+  document.getElementById("filterBar").hidden = !(DATA && DATA.summary && DATA.summary.stunden);
+  if (!(DATA && DATA.summary && DATA.summary.stunden)) return;
+  if (!RANGE) { loadRange(); return; }
+  renderFiltered();
 }
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
+document.querySelectorAll("nav button[role=tab]").forEach(b => b.onclick = () => showView(b.dataset.view));
+
+// ------------------------------------------------------------------ Zeitfilter
+let FILTER = { mode: "all" }, RANGE = null, BOUNDS = null, GRAN = "month";
+try { FILTER = JSON.parse(localStorage.getItem("tv-filter")) || FILTER; } catch (e) {}
+const pad = n => String(n).padStart(2, "0");
+const isoD = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return isoD(d); };
+const GR = { month: ["Monat", "Monat"], day: ["Tag", "Tages"], hour: ["Stunde", "Stunden"] };
+function lbl(k) {
+  if (k.length === 7) return monthName(k);
+  if (k.length === 10) return new Date(k + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  return k.slice(11) + " Uhr";
+}
+
+function rangeOf(f) {
+  const { min, max } = BOUNDS;
+  switch (f.mode) {
+    case "year": return [`${f.year}-01-01`, `${f.year}-12-31`];
+    case "month": { const [y, m] = f.month.split("-").map(Number); return [`${f.month}-01`, `${f.month}-${pad(new Date(y, m, 0).getDate())}`]; }
+    case "day": return [f.day, f.day];
+    case "range": return [f.von || min, f.bis || max];
+    default: return [min, max];
+  }
+}
+
+function setMode(mode) {
+  const max = BOUNDS.max;
+  FILTER.mode = mode;
+  if (mode === "year" && !FILTER.year) FILTER.year = +max.slice(0, 4);
+  if (mode === "month" && !FILTER.month) FILTER.month = max.slice(0, 7);
+  if (mode === "day" && !FILTER.day) FILTER.day = max;
+  if (mode === "range" && !FILTER.von) { FILTER.von = addDays(max, -29); FILTER.bis = max; }
+  applyFilter();
+}
+
+function step(n) {
+  const f = FILTER;
+  if (f.mode === "year") f.year += n;
+  else if (f.mode === "month") { const [y, m] = f.month.split("-").map(Number); const d = new Date(y, m - 1 + n, 1); f.month = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; }
+  else if (f.mode === "day") f.day = addDays(f.day, n);
+  else if (f.mode === "range") {
+    const len = Math.round((new Date(f.bis) - new Date(f.von)) / 86400000) + 1;
+    f.von = addDays(f.von, n * len); f.bis = addDays(f.bis, n * len);
+  }
+  applyFilter();
+}
+
+function renderFilterCtl() {
+  const f = FILTER, { min, max } = BOUNDS, y0 = +min.slice(0, 4), y1 = +max.slice(0, 4);
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === f.mode));
+  const nav = inner => `<button id="fPrev" title="zurück">‹</button>${inner}<button id="fNext" title="vor">›</button>`;
+  let html = "";
+  if (f.mode === "year") html = nav(`<select id="fYear">${Array.from({ length: y1 - y0 + 1 }, (_, i) => y0 + i).map(y => `<option ${y === f.year ? "selected" : ""}>${y}</option>`).join("")}</select>`);
+  if (f.mode === "month") html = nav(`<input type="month" id="fMonth" min="${min.slice(0, 7)}" max="${max.slice(0, 7)}" value="${f.month}">`);
+  if (f.mode === "day") html = nav(`<input type="date" id="fDay" min="${min}" max="${max}" value="${f.day}">`);
+  if (f.mode === "range") html = nav(`<input type="date" id="fVon" min="${min}" max="${max}" value="${f.von}"> bis <input type="date" id="fBis" min="${min}" max="${max}" value="${f.bis}">`);
+  const ctl = document.getElementById("fCtl");
+  ctl.innerHTML = html;
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onchange = fn; };
+  on("fYear", e => { f.year = +e.target.value; applyFilter(); });
+  on("fMonth", e => { if (e.target.value) { f.month = e.target.value; applyFilter(); } });
+  on("fDay", e => { if (e.target.value) { f.day = e.target.value; applyFilter(); } });
+  on("fVon", e => { if (e.target.value) { f.von = e.target.value; applyFilter(); } });
+  on("fBis", e => { if (e.target.value) { f.bis = e.target.value; applyFilter(); } });
+  const p = document.getElementById("fPrev"), n = document.getElementById("fNext");
+  if (p) p.onclick = () => step(-1);
+  if (n) n.onclick = () => step(1);
+}
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+function applyFilter() {
+  try { localStorage.setItem("tv-filter", JSON.stringify(FILTER)); } catch (e) {}
+  loadRange();
+}
+
+async function loadRange() {
+  if (!BOUNDS) return;
+  renderFilterCtl();
+  const [von, bis] = rangeOf(FILTER);
+  try { RANGE = await fetch(`api/range?von=${von}&bis=${bis}`).then(r => r.json()); }
+  catch (e) { RANGE = null; return; }
+  GRAN = RANGE.granularitaet;
+  const s = RANGE.summary;
+  document.getElementById("fLabel").textContent = FILTER.mode === "day" ? dateDE(von)
+    : `${dateDE(von)} – ${dateDE(bis)}` + (s.stunden ? ` · ${num(s.stunden / 24, 0)} Tage mit Daten` : "");
+  // Tagesdetail auf den gewählten Zeitraum setzen
+  const dday = von > BOUNDS.max ? BOUNDS.max : (bis > BOUNDS.max ? BOUNDS.max : bis);
+  document.querySelectorAll("input.day").forEach(el => el.value = FILTER.mode === "day" ? von : dday);
+  if (VIEW === "overview" || VIEW === "shift") renderFiltered();
+}
+
+function viewData() {
+  return Object.assign({}, DATA, { summary: RANGE.summary, monthly: RANGE.buckets, daily: RANGE.daily, profile: RANGE.profile });
+}
+
+function renderFiltered() {
+  const [p, P] = GR[GRAN];
+  document.querySelectorAll("[data-gt]").forEach(h => h.textContent = h.dataset.gt.replace("{p}", p).replace("{P}", P));
+  const box = document.getElementById(VIEW === "shift" ? "shiftKpis" : "kpis");
+  if (!RANGE.summary.stunden) {
+    box.innerHTML = `<div class="card empty" style="grid-column:1/-1">Keine Daten im gewählten Zeitraum.</div>`;
+    return;
+  }
+  (VIEW === "shift" ? renderShift : renderOverview)(viewData());
+  loadDay();
+}
 
 function render(d) {
   DATA = d;
@@ -266,9 +393,11 @@ function render(d) {
   document.getElementById("tabShift").hidden = !present(d).length;
   document.getElementById("tabStorage").hidden = !hasStorage(d);
   const D = d.daily;
+  if (D.length) BOUNDS = { min: D[0].key, max: D[D.length - 1].key };
   document.querySelectorAll("input.day").forEach(el => {
-    if (!el.value && D.length) { el.min = D[0].key; el.max = D[D.length - 1].key; el.value = D[D.length - 1].key; }
+    el.min = BOUNDS.min; el.max = BOUNDS.max; if (!el.value) el.value = BOUNDS.max;
   });
+  RANGE = null;
   showView(VIEW);
 }
 
@@ -282,7 +411,7 @@ function renderOverview(d) {
     (has ? kpi("Mit Lastverschiebung", eur(s.ersparnis_alle), `ggü. Festpreis · Details im Reiter „Lastverschiebung“`, sign(s.ersparnis_alle), "--all") : "") +
     kpi("Einspeisung", eur(s.feed), `${kwh(s.exp)} · in beiden Tarifen gleich`);
 
-  chart("cMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+  chart("cMonthly", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
     { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
     { label: "Dynamisch", data: M.map(m => m.dyn), backgroundColor: css("--dyn") } ] },
     options: { scales: { x: {}, y: eurAxis() }, plugins: eurTip } });
@@ -290,7 +419,7 @@ function renderOverview(d) {
   let a = 0, b = 0;
   const cum = [{ label: "Dynamisch", data: D.map(x => (a += x.fix - x.dyn)), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2 }];
   if (has) cum.push({ label: "Mit Lastverschiebung", data: D.map(x => (b += x.fix - x.dyn_all)), borderColor: css("--all"), pointRadius: 0, borderWidth: 2, borderDash: [5, 3] });
-  chart("cCum", { type: "line", data: { labels: D.map(x => new Date(x.key).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })), datasets: cum },
+  chart("cCum", { type: "line", data: { labels: D.map(x => lbl(x.key)), datasets: cum },
     options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: eurAxis() }, plugins: eurTip } });
 
   const F = d.future, nowH = Math.floor(Date.now() / 3600000) * 3600;
@@ -306,8 +435,8 @@ function renderOverview(d) {
     { label: "Ø Netzbezug (kWh)", data: P.map(p => p.imp), backgroundColor: css("--dyn") } ] },
     options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis() } } });
 
-  document.getElementById("tMonthly").innerHTML = `<tr><th>Monat</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th></tr>` +
-    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.imp)}</td><td>${ct(m.spot_mittel_ct)}</td><td>${ct(m.preis_gewichtet_ct)}</td>
+  document.getElementById("tMonthly").innerHTML = `<tr><th>${GR[GRAN][0]}</th><th>Bezug</th><th>Ø Börse</th><th>Ø dyn.</th><th>Festpreis</th><th>Dynamisch</th><th>Δ</th></tr>` +
+    M.map(m => `<tr><td>${lbl(m.key)}</td><td>${kwh(m.imp)}</td><td>${ct(m.spot_mittel_ct)}</td><td>${ct(m.preis_gewichtet_ct)}</td>
       <td>${eur(m.fix)}</td><td>${eur(m.dyn)}</td><td class="${sign(m.fix - m.dyn)}">${eur(m.fix - m.dyn)}</td></tr>`).join("") +
     `<tr><th>Summe</th><th>${kwh(s.imp)}</th><th></th><th>${ct(s.preis_gewichtet_ct)}</th><th>${eur(s.fix)}</th><th>${eur(s.dyn)}</th><th>${eur(s.ersparnis)}</th></tr>`;
 
@@ -322,25 +451,31 @@ function renderOverview(d) {
 // ------------------------------------------------------------------ Lastverschiebung
 function renderShift(d) {
   const s = d.summary, o = d.optionen, M = d.monthly, P = d.profile, ms = present(d);
-  const w = s.wp, ak = s.akku, ev = s.ev, pa = s.pv_arm;
+  const full = s.gesamt !== false;
+  const ev = (s.ev && typeof s.ev === "object") ? s.ev : {}, w = s.wp || { heizung: {}, warmwasser: {} };
+  const ak = s.akku || {}, pa = full ? s.pv_arm : null;
 
-  const subs = {
+  const subs = full ? {
     ev: `${kwh(ev.kwh_verschoben)} verschoben · ${ev.sitzungen} Ladevorgänge`,
     wp: `Heizung ${eur(w.heizung.ersparnis_eur)} · Warmwasser ${eur(w.warmwasser.ersparnis_eur)}`,
     akku: `${kwh(ak.kwh_netzladung)} Netzladung · ${num(ak.vollzyklen, 0)} Zyklen`,
+  } : {
+    ev: "Details nur im Gesamtzeitraum",
+    wp: `${kwh(s.wp_grid)} WP-Netzbezug`,
+    akku: `${kwh(ak.kwh_netzladung)} Netzladung`,
   };
   document.getElementById("shiftKpis").innerHTML =
     ms.map(m => kpi(m.label, eur(s[m.eff]), subs[m.id], sign(s[m.eff]), m.color)).join("") +
     kpi("Alle Maßnahmen", eur(s.effekt_alle), `ggü. dynamisch wie gemessen · Ø ${ct(s.preis_gewichtet_alle_ct)}/kWh`, sign(s.effekt_alle), "--all") +
     kpi("Alle Maßnahmen vs. Festpreis", eur(s.ersparnis_alle), `Kosten ${eur(s.dyn_all)} statt ${eur(s.fix)}`, sign(s.ersparnis_alle));
 
-  chart("cShiftMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+  chart("cShiftMonthly", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
     { label: "Festpreis", data: M.map(m => m.fix), backgroundColor: css("--fix") },
     { label: "Dynamisch wie gemessen", data: M.map(m => m.dyn), backgroundColor: css("--dyn") },
     { label: "Dynamisch + alle Maßnahmen", data: M.map(m => m.dyn_all), backgroundColor: css("--all") } ] },
     options: { scales: { x: {}, y: eurAxis() }, plugins: eurTip } });
 
-  chart("cShiftEffect", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets:
+  chart("cShiftEffect", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets:
     ms.map(m => ({ label: m.label, data: M.map(x => x.dyn - x[m.cost]), backgroundColor: css(m.color), stack: "e" })).concat(
     [{ type: "line", label: "Alle kombiniert", data: M.map(x => x.dyn - x.dyn_all), borderColor: css("--all"), pointRadius: 3, borderWidth: 2 }]) },
     options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
@@ -354,8 +489,8 @@ function renderShift(d) {
     options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis(), y1: ctAxis() } } });
 
   document.getElementById("tShift").innerHTML =
-    `<tr><th>Monat</th><th>Bezug</th><th>Dynamisch</th>${ms.map(m => `<th>${m.label}</th>`).join("")}<th>Alle</th><th>Dyn.+alle</th><th>ggü. Festpreis</th>${s.vorhanden.wp ? "<th>WP-Netzbezug</th><th>davon WW</th>" : ""}${s.vorhanden.akku ? "<th>Akku-Netzladung</th>" : ""}</tr>` +
-    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.imp)}</td><td>${eur(m.dyn)}</td>
+    `<tr><th>${GR[GRAN][0]}</th><th>Bezug</th><th>Dynamisch</th>${ms.map(m => `<th>${m.label}</th>`).join("")}<th>Alle</th><th>Dyn.+alle</th><th>ggü. Festpreis</th>${s.vorhanden.wp ? "<th>WP-Netzbezug</th><th>davon WW</th>" : ""}${s.vorhanden.akku ? "<th>Akku-Netzladung</th>" : ""}</tr>` +
+    M.map(m => `<tr><td>${lbl(m.key)}</td><td>${kwh(m.imp)}</td><td>${eur(m.dyn)}</td>
       ${ms.map(x => `<td class="${sign(m.dyn - m[x.cost])}">${eur(m.dyn - m[x.cost])}</td>`).join("")}
       <td class="${sign(m.dyn - m.dyn_all)}">${eur(m.dyn - m.dyn_all)}</td><td>${eur(m.dyn_all)}</td>
       <td class="${sign(m.fix - m.dyn_all)}">${eur(m.fix - m.dyn_all)}</td>
@@ -366,19 +501,19 @@ function renderShift(d) {
 
   const cards = [];
   if (s.vorhanden.ev) cards.push(`<div class="card"><h3>E-Auto</h3><dl>
-    <dt>Verschobene Ladevorgänge</dt><dd>${ev.sitzungen}</dd>
+    <dt>Verschobene Ladevorgänge</dt><dd>${ev.sitzungen ?? "–"}</dd>
     <dt>Verschobene Energie</dt><dd>${kwh(ev.kwh_verschoben)}</dd>
     <dt>Ersparnis</dt><dd>${eur(s.effekt_ev)}</dd>
     <dt>Fenster</dt><dd>Start ab ${o.ev_abend_ab_uhr}:00, fertig bis ${o.ev_fertig_bis_uhr}:00</dd>
     <dt>Max. Ladeleistung</dt><dd>${num(o.ev_max_kw)} kW</dd></dl>
     <div class="note">Nur der Netzanteil abendlicher/nächtlicher Ladevorgänge wird verschoben. Laden die Autos aus PV oder Hausakku, gibt es nichts zu verschieben.</div></div>`);
   if (s.vorhanden.wp) cards.push(`<div class="card"><h3>Wärmepumpe</h3><dl>
-    <dt>WP-Netzbezug</dt><dd>${kwh(w.wp_netz_kwh)} (${pct(w.wp_netz_kwh, s.imp)})</dd>
+    <dt>WP-Netzbezug</dt><dd>${kwh(s.wp_grid)} (${pct(s.wp_grid, s.imp)})</dd>
     <dt>Ø Preis WP-Strom</dt><dd>${ct(s.preis_wp_ct)} → ${ct(s.preis_wp_neu_ct)}</dd>
     <dt><b>Heizung</b></dt><dd>${kwh(w.heizung.kwh_netz)}</dd>
     <dt>&nbsp;&nbsp;verschoben · Ersparnis</dt><dd>${kwh(w.heizung.kwh_verschoben)} · ${eur(w.heizung.ersparnis_eur)}</dd>
     <dt>&nbsp;&nbsp;Modell</dt><dd>${num(o.wp_heiz_anteil_verschiebbar * 100, 0)} %, ±${o.wp_heiz_fenster_h} h, ≤ ${num(o.wp_heiz_max_kw)} kW, +${num(o.wp_heiz_mehrverbrauch_prozent, 0)} %</dd>
-    <dt><b>Warmwasser</b></dt><dd>${kwh(w.warmwasser.kwh_netz)} · ${w.warmwasser.stunden} h</dd>
+    <dt><b>Warmwasser</b></dt><dd>${kwh(full ? w.warmwasser.kwh_netz : s.wp_ww)} · ${w.warmwasser.stunden ?? "–"} h</dd>
     <dt>&nbsp;&nbsp;verschoben · Ersparnis</dt><dd>${kwh(w.warmwasser.kwh_verschoben)} · ${eur(w.warmwasser.ersparnis_eur)}</dd>
     <dt>&nbsp;&nbsp;Modell</dt><dd>100 %, ±${o.ww_fenster_h} h, ≤ ${num(o.ww_max_kw)} kW, +${num(o.ww_mehrverbrauch_prozent, 0)} %</dd></dl>
     <div class="note">Warmwasser-Stunden werden an der Spitzenleistung erkannt (≥ ${num(o.ww_schwelle_w, 0)} W). Der Speicher macht sie voll verschiebbar;
@@ -395,6 +530,8 @@ function renderShift(d) {
     <div class="note">Der Akku lädt in günstigen Stunden aus dem Netz, soweit der <b>reale</b> Ladestand bis zur Entladung Platz lässt –
       PV-Ladung wird also nicht verdrängt. An PV-armen Tagen ist der Akku meist leer, deshalb passiert die Netzladung vor allem dort.
       Entladen wird innerhalb von 24 h in teureren Stunden, wenn Preis × Wirkungsgrad den Ladepreis um den Mindestabstand übersteigt.</div></div>`);
+  if (!full && cards.length) cards.push(`<div class="card note" style="margin-top:0">Für den gewählten Zeitraum gelten Kosten, Ersparnis und Energiemengen.
+    Detailwerte wie Ladevorgänge, Aufteilung Heizung/Warmwasser, Zyklen und PV-arme Tage gibt es nur im Gesamtzeitraum.</div>`);
   document.getElementById("measureCards").innerHTML = cards.join("");
 }
 
