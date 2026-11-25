@@ -12,7 +12,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import config, prices, sim, storage
+from . import config, migrate, prices, sim, storage
 from .ha import HAClient, HAError, ts_of
 
 _LOG = logging.getLogger("tarifvergleich")
@@ -508,6 +508,20 @@ def build_web(engine: Engine) -> web.Application:
             asyncio.create_task(engine.run())
         return web.json_response({"ok": True})
 
+    async def api_migrate(req):
+        """Einmalig: POST /api/migrate?src=<statistik>&dst=<statistik>&dry=1 (dry=0 schreibt)."""
+        src, dst = req.query.get("src", ""), req.query.get("dst", "")
+        if not src.startswith("sensor.") or not dst.startswith("sensor."):
+            return web.json_response({"error": "src und dst (sensor.*) erforderlich"}, status=400)
+        dry = req.query.get("dry", "1") != "0"
+        try:
+            async with engine.busy:
+                rep = await migrate.copy_hourly(engine.ha, src, dst, TZ, dry_run=dry)
+        except HAError as err:
+            return web.json_response({"error": str(err)}, status=500)
+        return web.json_response(rep)
+
+    app.router.add_post("/api/migrate", api_migrate)
     app.router.add_get("/", index)
     app.router.add_get("/api/data", api_data)
     app.router.add_get("/api/day", api_day)
