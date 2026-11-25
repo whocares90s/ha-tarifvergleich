@@ -1,4 +1,4 @@
-# Tarifvergleich – Home-Assistant-App
+# WattWert – Home-Assistant-App
 
 Simuliert, was der tatsächliche Netzbezug mit einem dynamischen Stromtarif (Tibber-Formel:
 Börsenpreis + Netzentgelte, Umlagen, Steuern) gekostet hätte – im Vergleich zum Festpreis.
@@ -10,7 +10,7 @@ Details siehe [tarifvergleich/DOCS.md](tarifvergleich/DOCS.md).
 
 1. In Home Assistant: **Einstellungen → Apps → App-Store → ⋮ → Repositories** →
    `https://github.com/whocares90s/ha-tarifvergleich` eintragen.
-2. „Tarifvergleich“ installieren, unter **Konfiguration** Werte prüfen, starten, „In Seitenleiste anzeigen“.
+2. „WattWert“ installieren, unter **Konfiguration** Werte prüfen, starten, „In Seitenleiste anzeigen“.
 3. Updates: Version in `tarifvergleich/config.yaml` erhöhen, committen, pushen – HA bietet das Update dann an.
 
 ### Variante B – lokale App

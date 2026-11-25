@@ -67,6 +67,11 @@ DEFAULTS: dict = {
     "pv_anlage_kosten_eur": 0,
     "pv_dach_statistik": "",
     "pv_kosten_inkl_weitere_pv": True,
+    "co2_faktor_g_kwh": 380.0,
+    "akku_zyklen_lebensdauer": 6000,
+    "akku_soh_ende_prozent": 70.0,
+    "bericht_dienst": "",
+    "bericht_uhrzeit": 8,
     "log_level": "info",
 }
 

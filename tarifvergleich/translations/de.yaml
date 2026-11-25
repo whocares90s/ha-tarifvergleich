@@ -138,5 +138,19 @@ configuration:
   pv_kosten_inkl_weitere_pv:
     name: PV-Anlage – Kosten enthalten weitere PV (z. B. Garage)
     description: An = Ertrag der weiteren PV-Anlagen zählt in die Amortisation mit.
+  co2_faktor_g_kwh:
+    name: CO₂-Faktor Netzstrom (g/kWh)
+    description: Nur Ersatzwert, falls für eine Stunde keine CO₂-Intensität von Energy-Charts vorliegt.
+  akku_zyklen_lebensdauer:
+    name: Akku – Lebensdauer in Vollzyklen
+    description: Herstellerangabe, Grundlage für Verschleißkosten je kWh (typisch LFP 6000).
+  akku_soh_ende_prozent:
+    name: Akku – Lebensende bei SoH (%)
+    description: Ab diesem Gesundheitswert gilt ein Akku als verbraucht (typisch 70–80 %).
+  bericht_dienst:
+    name: Monatsbericht – Benachrichtigungsdienst
+    description: z. B. notify.mobile_app_handy. Leer = kein Monatsbericht.
+  bericht_uhrzeit:
+    name: Monatsbericht – frühestens ab (Uhr) am Monatsersten
   log_level:
     name: Log-Level

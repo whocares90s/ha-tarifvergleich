@@ -1,7 +1,7 @@
-name: Tarifvergleich
-version: "0.8.0"
+name: WattWert
+version: "0.9.0"
 slug: tarifvergleich
-description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
+description: Was ist jede kWh wert? Tarifvergleich fix vs. dynamisch, Lastverschiebung, PV- und Speicher-Wirtschaftlichkeit.
 url: https://github.com/whocares90s/ha-tarifvergleich
 arch:
   - amd64
@@ -12,8 +12,8 @@ boot: auto
 homeassistant_api: true
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:cash-clock
-panel_title: Tarifvergleich
+panel_icon: mdi:lightning-bolt-circle
+panel_title: WattWert
 options:
   startdatum: "2025-01-23"
   statistik_netzbezug: sensor.ebz_energy_in
@@ -80,6 +80,11 @@ options:
   pv_anlage_kosten_eur: 4000
   pv_dach_statistik: sensor.deye_sunsynk_sol_ark_3_phase_pv_energy
   pv_kosten_inkl_weitere_pv: true
+  co2_faktor_g_kwh: 380
+  akku_zyklen_lebensdauer: 6000
+  akku_soh_ende_prozent: 70
+  bericht_dienst: notify.mobile_app_s25_ultra_joe
+  bericht_uhrzeit: 8
   log_level: info
 schema:
   startdatum: match(^\d{4}-\d{2}-\d{2}$)
@@ -143,4 +148,9 @@ schema:
   pv_anlage_kosten_eur: float?
   pv_dach_statistik: str?
   pv_kosten_inkl_weitere_pv: bool
+  co2_faktor_g_kwh: float
+  akku_zyklen_lebensdauer: int
+  akku_soh_ende_prozent: float(0,100)
+  bericht_dienst: str?
+  bericht_uhrzeit: int(0,23)
   log_level: list(debug|info|warning|error)

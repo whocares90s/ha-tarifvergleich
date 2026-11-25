@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tarifvergleich</title>
+<title>WattWert</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -77,7 +77,7 @@
 <body>
 <main>
   <header>
-    <h1>Tarifvergleich</h1>
+    <h1>WattWert</h1>
     <span class="muted" id="period">lädt …</span>
     <span style="flex:1"></span>
     <span class="muted" id="status"></span>
@@ -172,9 +172,11 @@
       <h2 style="margin:4px 0 10px">Gesamte PV-Anlage</h2>
       <p class="intro" id="stSysIntro"></p>
       <div class="grid kpis" id="stSysKpis"></div>
-      <section class="card" style="margin-bottom:16px">
-        <h2 data-gt="Ersparnis der Anlage je {p}">Ersparnis der Anlage je Monat</h2>
-        <div class="chart"><canvas id="cStSystem"></canvas></div>
+      <section class="grid two" style="margin-bottom:16px">
+        <div class="card"><h2 data-gt="Ersparnis der Anlage je {p}">Ersparnis der Anlage je Monat</h2>
+          <div class="chart"><canvas id="cStSystem"></canvas></div></div>
+        <div class="card"><h2 data-gt="Autarkie, Eigenverbrauch und CO₂ je {p}">Autarkie, Eigenverbrauch und CO₂ je Monat</h2>
+          <div class="chart"><canvas id="cStQuote"></canvas></div></div>
       </section>
     </div>
 
@@ -195,6 +197,17 @@
 
     <section class="grid three" id="stCards"></section>
 
+    <div id="stHealth">
+      <h2 style="margin:20px 0 10px">Akku-Gesundheit <span class="muted" style="font-weight:400">· immer aktueller Stand</span></h2>
+      <section class="grid three" id="stHealthCards"></section>
+      <section class="card">
+        <h2>Verlauf Gesundheit (SoH) und Zyklen</h2>
+        <div class="chart"><canvas id="cStHealth"></canvas></div>
+        <div class="note">Die Akkus melden SoH und Zyklen erst seit Beginn der Felicity-Anbindung. Der Verlauf wird mit jedem Tag aussagekräftiger.
+          Restlebensdauer: lineare Fortschreibung des bisherigen SoH-Verlusts je Zyklus bis zum eingestellten Lebensende.</div>
+      </section>
+    </div>
+
     <section class="card">
       <h2 data-gt="{P}übersicht Speicher">Monatsübersicht Speicher</h2>
       <div class="scroll"><table id="tStorage"></table></div>
@@ -203,6 +216,13 @@
     <section class="card">
       <h2>Rechenweg</h2>
       <div class="note" style="margin-top:0" id="stMethod"></div>
+    </section>
+
+    <section class="card">
+      <div class="row"><h2 style="margin:0">Monatsbericht</h2>
+        <span><input type="month" id="repMonth"> <button id="repPreview">Vorschau</button> <button id="repSend">Jetzt senden</button></span></div>
+      <pre id="repOut" class="note" style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:var(--text)"></pre>
+      <div class="note" id="repInfo"></div>
     </section>
   </div>
 </main>
@@ -598,6 +618,20 @@ function renderStorage(d, R) {
       { label: "Bestandsakku", data: M.map(m => m.s_old), backgroundColor: css("--dyn"), stack: "s" },
       ...(hasExt ? [{ label: "Erweiterung", data: M.map(m => m.s_ext), backgroundColor: css("--ev"), stack: "s" }] : []) ] },
       options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
+
+    // Autarkie, Eigenverbrauch, CO2
+    const q = x => ({ aut: x.load > 0 ? (x.load - x.imp_kwh) / x.load * 100 : null, eig: x.pv > 0 ? (x.pv - x.exp_kwh) / x.pv * 100 : null });
+    const Q = q(S), t = v => v == null ? "–" : (v >= 1000 ? num(v / 1000, 2) + " t" : num(v, 0) + " kg");
+    document.getElementById("stSysKpis").innerHTML +=
+      kpi("Autarkie", num(Q.aut, 0) + " %", `${kwh(S.load - S.imp_kwh)} von ${kwh(S.load)} Verbrauch selbst gedeckt`, "", "--good") +
+      kpi("Eigenverbrauchsquote", num(Q.eig, 0) + " %", `${kwh(S.pv - S.exp_kwh)} von ${kwh(S.pv)} PV-Strom selbst genutzt`, "", "--price") +
+      kpi("CO₂ vermieden", t(S.co2_avoid), `durch ${kwh(S.pv)} PV-Strom · Netzbezug verursachte ${t(S.co2_grid)}`, "", "--ev");
+    chart("cStQuote", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
+      { type: "line", label: "Autarkie (%)", data: M.map(m => q(m).aut), borderColor: css("--good"), pointRadius: 2, borderWidth: 2, yAxisID: "y" },
+      { type: "line", label: "Eigenverbrauch (%)", data: M.map(m => q(m).eig), borderColor: css("--price"), pointRadius: 2, borderWidth: 2, yAxisID: "y" },
+      { label: "CO₂ vermieden (kg)", data: M.map(m => m.co2_avoid), backgroundColor: css("--line"), yAxisID: "y1" } ] },
+      options: { scales: { x: {}, y: { min: 0, max: 100, ticks: { callback: v => v + " %" } },
+        y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: v => v + " kg" } } } } });
   }
   document.getElementById("stKpis").innerHTML =
     kpi(`Ersparnis ${tag}`, eur(S.s_fix), `${kwh(S.b_out)} entladen · Ø ${ct(S.ct_je_kwh)} je kWh`, sign(S.s_fix), "--bat") +
@@ -665,6 +699,7 @@ function renderStorage(d, R) {
     <div class="note">Damit der Zusatznutzen glaubwürdig ist, muss die Simulation mit dem tatsächlichen Ausbau die gemessene Ersparnis treffen.
       Kleine Abweichungen kommen aus der Stundenauflösung und der vereinfachten Lade-/Entladelogik.</div></div>`);
   document.getElementById("stCards").innerHTML = cards.join("");
+  renderHealth(G, d.speicher.gesundheit_verlauf || {});
 
   document.getElementById("tStorage").innerHTML =
     `<tr><th>${GR[GRAN][0]}</th><th>Ladung PV</th><th>Ladung Netz</th><th>Entladung</th><th>vermiedener Bezug</th><th>entgangene Einspeisung</th><th>Netzladekosten</th><th>Ersparnis</th>${hasExt ? "<th>davon Erweiterung</th><th>Zusatznutzen</th>" : ""}<th>dyn. bewertet</th></tr>` +
@@ -687,6 +722,58 @@ function renderStorage(d, R) {
     Aufteilung auf die Speicher: vor ${dateDE(E.start)} alles Bestandsakku, danach nach gemessener Leistung je Akku, wo nicht vorhanden nach Kapazität.<br>
     Die dynamische Bewertung setzt statt des Festpreises den stündlichen Tibber-Preis an. Stundenauflösung; Wechselrichterverluste sind nicht abgezogen (Messung akkuseitig).`;
 }
+
+// ------------------------------------------------------------------ Akku-Gesundheit
+function renderHealth(G, V) {
+  const H = G.gesundheit || {}, box = document.getElementById("stHealth");
+  const items = [["bestand", "Bestandsakku", G.bestand, "--dyn"], ["erweiterung", "Erweiterung", G.erweiterung, "--ev"]]
+    .filter(([k, , info]) => H[k] && info);
+  box.hidden = !items.length;
+  if (!items.length) return;
+  const val = G.ct_je_kwh;  // Ø Ersparnis je entladener kWh
+  document.getElementById("stHealthCards").innerHTML = items.map(([k, name, info]) => {
+    const h = H[k];
+    const wearOk = h.verschleiss_ct_kwh != null && val != null ? (h.verschleiss_ct_kwh < val ? "pos" : "neg") : "";
+    return `<div class="card"><h3>${name} ${num(info.kwh)} kWh</h3><dl>
+      <dt>Gesundheit (SoH)</dt><dd>${num(info.soh, 0)} %</dd>
+      <dt>Zyklen bisher</dt><dd>${num(info.zyklen, 0)}${h.zyklen_pro_jahr ? ` · ${num(h.zyklen_pro_jahr, 0)}/Jahr` : ""}</dd>
+      <dt>SoH-Verlust je 100 Zyklen</dt><dd>${h.soh_verlust_pro_100_zyklen != null ? num(h.soh_verlust_pro_100_zyklen, 2) + " %" : "–"}</dd>
+      <dt>Rest bis ${num(h.soh_ende, 0)} % SoH</dt><dd>${h.rest_zyklen != null ? num(h.rest_zyklen, 0) + " Zyklen" : "–"}${h.rest_jahre != null ? ` · ≈ ${years(h.rest_jahre)}` : ""}</dd>
+      <dt>Kosten je Zyklus</dt><dd>${h.kosten_je_zyklus_eur != null ? eur(h.kosten_je_zyklus_eur) : "–"}</dd>
+      <dt>Verschleiß je kWh</dt><dd class="${wearOk}">${h.verschleiss_ct_kwh != null ? ct(h.verschleiss_ct_kwh) : "–"}</dd></dl>
+      <div class="note">Verschleiß = Anschaffung ÷ (${num(h.zyklen_lebensdauer, 0)} Zyklen × Kapazität). Zum Vergleich: Ø Ersparnis je entladener kWh ${ct(val)}.
+        ${h.soh_verlust_pro_100_zyklen === 0 ? "Noch kein SoH-Verlust gemeldet – Restlebensdauer nach Zyklenzahl." : ""}</div></div>`;
+  }).join("");
+
+  const keys = [...new Set(Object.values(V).flat().map(x => x.key))].sort();
+  const ds = [];
+  items.forEach(([k, name, , col]) => {
+    const m = Object.fromEntries((V[k] || []).map(x => [x.key, x]));
+    ds.push({ label: `${name} SoH (%)`, data: keys.map(x => m[x] ? m[x].soh : null), borderColor: css(col), borderWidth: 2, pointRadius: 0, yAxisID: "y", spanGaps: true });
+    ds.push({ label: `${name} Zyklen`, data: keys.map(x => m[x] ? m[x].zyklen : null), borderColor: css(col), borderDash: [5, 3], borderWidth: 1.5, pointRadius: 0, yAxisID: "y1", spanGaps: true });
+  });
+  chart("cStHealth", { type: "line", data: { labels: keys.map(x => dateDE(x)), datasets: ds },
+    options: { scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { suggestedMin: 80, suggestedMax: 100, ticks: { callback: v => v + " %" } },
+      y1: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Zyklen", color: css("--muted") } } } } });
+}
+
+// ------------------------------------------------------------------ Monatsbericht
+(function () {
+  const m = document.getElementById("repMonth"), out = document.getElementById("repOut"), info = document.getElementById("repInfo");
+  const d = new Date(); d.setDate(0);
+  m.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  info.textContent = "Wird automatisch am Monatsersten über den in der Konfiguration eingestellten Dienst gesendet.";
+  const run = async send => {
+    out.textContent = send ? "Sende …" : "Lade …";
+    try {
+      const r = await fetch(`api/report?monat=${m.value}&send=${send ? 1 : 0}`, { method: "POST" }).then(x => x.json());
+      out.textContent = r.fehler ? r.fehler : `${r.title}\n\n${r.message}`;
+      if (send) info.textContent = r.gesendet ? "Gesendet." : "Nicht gesendet – Dienst in der Konfiguration prüfen (bericht_dienst).";
+    } catch (e) { out.textContent = "Fehler: " + e; }
+  };
+  document.getElementById("repPreview").onclick = () => run(false);
+  document.getElementById("repSend").onclick = () => run(true);
+})();
 
 // ------------------------------------------------------------------ Tagesdetail
 async function loadDay() {

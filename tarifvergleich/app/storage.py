@@ -42,12 +42,14 @@ def simulate_storage(surplus, deficit, cap_kwh, max_kw, eta):
     return ins, outs
 
 
-def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInfo, pv_roof=None) -> dict:
+def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInfo, pv_roof=None, co2=None) -> dict:
     """hours: Unix-Stundenbeginn; b_in/b_out/pv: kWh (pv = alle PV-Anlagen); imp/exp: kWh oder None
     (keine Netzdaten); spot: €/MWh oder None; w_old/w_ext: |mittlere Leistung| je Akku in W oder None;
     pv_roof: Ertrag der Hauptanlage (Dach) in kWh, None = alles ist Hauptanlage."""
     pv_roof = pv_roof if pv_roof is not None else pv
     n = len(hours)
+    co2_default = float(o.get("co2_faktor_g_kwh") or 380.0)
+    co2 = co2 if co2 is not None else [None] * n
     hist = parse_price_history(o.get("bezugspreis_historie"), o["festpreis_arbeitspreis_ct_brutto"], tz)
     feed = float(o["einspeiseverguetung_ct"])
     cap_old = float(o["speicher_bestand_kwh"])
@@ -94,6 +96,11 @@ def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInf
             "pv": pv[k], "pv_roof": pv_roof[k], "selfc": selfc, "exp_kwh": e,
             "self_val": selfc * P / 100.0, "feed_rev": (e + pvc) * feed / 100.0,
             "s_pv_roof": pv_val * roof_share, "s_pv_other": pv_val * (1.0 - roof_share),
+            # Hausverbrauch aus der Energiebilanz, Netzbezug, CO2 (kg)
+            "load": max(0.0, pv[k] + (imp[k] or 0.0) - e - b_in[k] + b_out[k]),
+            "imp_kwh": imp[k] or 0.0,
+            "co2_avoid": pv[k] * (co2[k] if co2[k] is not None else co2_default) / 1000.0,
+            "co2_grid": (imp[k] or 0.0) * (co2[k] if co2[k] is not None else co2_default) / 1000.0,
         })
 
     # --- Zusatznutzen der Erweiterung (nur wo Netzdaten vorhanden sind)
@@ -136,7 +143,7 @@ def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInf
 
 SUM_KEYS = ("b_in", "b_out", "pvc", "gc", "avoided", "lost_feed", "grid_cost", "s_fix", "s_old", "s_ext",
             "marg", "marg_year", "pv", "pv_roof", "selfc", "exp_kwh", "self_val", "feed_rev",
-            "s_pv_roof", "s_pv_other")
+            "s_pv_roof", "s_pv_other", "load", "imp_kwh", "co2_avoid", "co2_grid")
 
 
 KEY_FMT = {"hour": "%Y-%m-%d %H", "day": "%Y-%m-%d", "month": "%Y-%m"}
@@ -157,6 +164,36 @@ def aggregate(rows, tz: ZoneInfo, key: str) -> list[dict]:
             a["dyn_hours"] += 1
         a["hours"] += 1
     return [out[k] for k in sorted(out)]
+
+
+def battery_health(kwh: float, start: str | None, cost: float, soh: float | None, cycles: float | None,
+                   o: dict, tz: ZoneInfo) -> dict:
+    """Verschleiß und Restlebensdauer aus aktuellem SoH, Zyklen und Alter (lineare Annahme)."""
+    life_cycles = float(o.get("akku_zyklen_lebensdauer") or 6000)
+    soh_end = float(o.get("akku_soh_ende_prozent") or 70)
+    out = {"zyklen_lebensdauer": life_cycles, "soh_ende": soh_end}
+    if cost and kwh:
+        # Verschleißkosten je durchgesetzter kWh bei voller Lebensdauer
+        out["verschleiss_ct_kwh"] = cost / (life_cycles * kwh) * 100.0
+        out["kosten_je_zyklus_eur"] = cost / life_cycles
+    if start and cycles:
+        age = (dt.datetime.now(tz).date() - dt.date.fromisoformat(start)).days / 365.0
+        if age > 0.05:
+            out["alter_jahre"] = age
+            out["zyklen_pro_jahr"] = cycles / age
+    if soh is not None and cycles:
+        loss = max(0.0, 100.0 - soh)
+        out["soh_verlust_pro_100_zyklen"] = loss / cycles * 100.0 if loss > 0 else 0.0
+        if loss > 0:
+            rest_cycles = max(0.0, (soh - soh_end) / (loss / cycles))
+            out["rest_zyklen"] = rest_cycles
+            if out.get("zyklen_pro_jahr"):
+                out["rest_jahre"] = rest_cycles / out["zyklen_pro_jahr"]
+        else:
+            out["rest_zyklen"] = max(0.0, life_cycles - cycles)
+            if out.get("zyklen_pro_jahr"):
+                out["rest_jahre"] = out["rest_zyklen"] / out["zyklen_pro_jahr"]
+    return out
 
 
 def range_totals(rows) -> dict:
@@ -214,8 +251,22 @@ def summary(res: dict, o: dict, tz: ZoneInfo, live: dict) -> dict:
         "amortisation": sys_pay,
     }
 
+    ld, ik, pvt, ex = tot["load"], tot["imp_kwh"], tot["pv"], tot["exp_kwh"]
+    anlage["autarkie"] = (ld - ik) / ld * 100.0 if ld > 0 else None
+    anlage["eigenverbrauch"] = (pvt - ex) / pvt * 100.0 if pvt > 0 else None
+    anlage["co2_vermieden_kg"] = tot["co2_avoid"]
+    anlage["co2_netz_kg"] = tot["co2_grid"]
+    b_live, e_live = live.get("bestand", {}), live.get("erweiterung", {})
+    health = {
+        "bestand": battery_health(float(o["speicher_bestand_kwh"]), o.get("speicher_bestand_start"), cost_old,
+                                  b_live.get("soh"), b_live.get("zyklen"), o, tz),
+        "erweiterung": battery_health(float(o["speicher_erweiterung_kwh"]), ext_start, cost_ext,
+                                      e_live.get("soh"), e_live.get("zyklen"), o, tz) if ext_start else None,
+    }
+
     return {
         "anlage": anlage,
+        "gesundheit": health,
         **tot,
         "von": dt.datetime.fromtimestamp(rows[0]["t"], tz).isoformat(),
         "bis": dt.datetime.fromtimestamp(last + 3600, tz).isoformat(),

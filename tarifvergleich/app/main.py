@@ -1,4 +1,4 @@
-"""Tarifvergleich – Einstiegspunkt: stündlicher Rechenlauf + Web-Oberfläche (Ingress)."""
+"""WattWert – Einstiegspunkt: stündlicher Rechenlauf + Web-Oberfläche (Ingress)."""
 from __future__ import annotations
 
 import asyncio
@@ -22,12 +22,12 @@ STATE_FILE = Path(config.DATA_DIR) / "state.json"
 PORT = int(os.environ.get("PORT", "8099"))
 
 STAT_IDS = {
-    "fix": ("tarifvergleich:kosten_festpreis", "Tarifvergleich Kosten Festpreis"),
-    "dyn": ("tarifvergleich:kosten_dynamisch", "Tarifvergleich Kosten dynamisch"),
-    "dyn_all": ("tarifvergleich:kosten_dynamisch_optimiert", "Tarifvergleich Kosten dynamisch + Lastverschiebung"),
+    "fix": ("tarifvergleich:kosten_festpreis", "WattWert Kosten Festpreis"),
+    "dyn": ("tarifvergleich:kosten_dynamisch", "WattWert Kosten dynamisch"),
+    "dyn_all": ("tarifvergleich:kosten_dynamisch_optimiert", "WattWert Kosten dynamisch + Lastverschiebung"),
 }
-PRICE_STAT = ("tarifvergleich:preis_dynamisch", "Tarifvergleich Preis dynamisch")
-STORAGE_STAT = ("tarifvergleich:speicher_ersparnis", "Tarifvergleich Ersparnis Batteriespeicher")
+PRICE_STAT = ("tarifvergleich:preis_dynamisch", "WattWert Preis dynamisch")
+STORAGE_STAT = ("tarifvergleich:speicher_ersparnis", "WattWert Ersparnis Batteriespeicher")
 # aus v0.2.0, werden einmalig entfernt
 OBSOLETE_STATS = ["tarifvergleich:kosten_dynamisch_wp", "tarifvergleich:kosten_dynamisch_alle"]
 OBSOLETE_STATES = ["sensor.tarifvergleich_kosten_dynamisch_wp", "sensor.tarifvergleich_ersparnis_wp",
@@ -60,6 +60,21 @@ def _series(stats: dict, sid: str, key: str) -> dict[int, float]:
 
 def _r(v, nd: int = 2):
     return round(v, nd) if isinstance(v, (int, float)) else v
+
+
+MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+          "November", "Dezember"]
+
+
+def _de(v, nd: int = 2) -> str:
+    if v is None:
+        return "–"
+    s = f"{v:,.{nd}f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _eur(v) -> str:
+    return f"{_de(v, 2)} €"
 
 
 def _read_state() -> dict:
@@ -113,6 +128,8 @@ class Engine:
         if self._storage_enabled():
             price_start = min(start_date, dt.date.fromisoformat(o["speicher_bestand_start"]))
         await prices.refresh(self.store, self.session, price_start)
+        if self._storage_enabled():
+            await prices.refresh_co2(self.store, self.session, price_start)
 
         ev_ids = [s for s in (o.get("ev_statistiken") or []) if s] if o.get("e_auto_vorhanden") else []
         wp_id = (o.get("wp_statistik") or "") if o.get("waermepumpe_vorhanden") else ""
@@ -175,6 +192,66 @@ class Engine:
             self.storage_error = f"{type(err).__name__}: {err}"
             _LOG.exception("Speicher-Auswertung fehlgeschlagen")
 
+        try:
+            await self._maybe_send_report()
+        except Exception:  # noqa: BLE001
+            _LOG.exception("Monatsbericht fehlgeschlagen")
+
+    # ------------------------------------------------------------------ Monatsbericht
+    def build_report(self, month_key: str) -> dict | None:
+        m = next((x for x in self.monthly if x["key"] == month_key), None)
+        if not m:
+            return None
+        y, mo = month_key.split("-")
+        title = f"WattWert – {MONATE[int(mo) - 1]} {y}"
+        diff = m["dyn"] - m["fix"]
+        lines = [
+            f"Netzbezug {_de(m['imp'], 0)} kWh · Festpreis {_eur(m['fix'])}",
+            f"Dynamisch wäre {_eur(abs(diff))} {'teurer' if diff > 0 else 'günstiger'} gewesen ({_eur(m['dyn'])}).",
+        ]
+        sm = next((x for x in (self.storage.get("monthly") or []) if x["key"] == month_key), None)
+        if sm:
+            pv_total = sm["s_pv_roof"] + sm["s_pv_other"] + sm["s_fix"]
+            aut = (sm["load"] - sm["imp_kwh"]) / sm["load"] * 100.0 if sm["load"] > 0 else None
+            lines.append(f"PV-Anlage hat {_eur(pv_total)} gespart, davon Speicher {_eur(sm['s_fix'])}.")
+            lines.append(f"Autarkie {_de(aut, 0)} % · {_de(sm['co2_avoid'], 0)} kg CO₂ vermieden")
+        a = ((self.storage.get("summary") or {}).get("anlage") or {}).get("amortisation")
+        if a:
+            be = a.get("break_even")
+            be_txt = f", Break-even {MONATE[int(be[5:7]) - 1]} {be[:4]}" if be and a["rest_eur"] > 0 else ""
+            lines.append(f"Amortisation {_de(a['prozent'], 0)} %{be_txt}" if a["rest_eur"] > 0
+                         else "Anlage ist amortisiert 🎉")
+        return {"title": title, "message": "\n".join(lines)}
+
+    async def send_report(self, month_key: str) -> dict:
+        rep = self.build_report(month_key)
+        if not rep:
+            return {"fehler": f"keine Daten für {month_key}"}
+        svc = (self.opts.get("bericht_dienst") or "").strip()
+        rep["gesendet"] = False
+        if "." in svc:
+            domain, service = svc.split(".", 1)
+            rep["gesendet"] = await self.ha.call_service(domain, service, {"title": rep["title"], "message": rep["message"]})
+        return rep
+
+    async def _maybe_send_report(self) -> None:
+        if not (self.opts.get("bericht_dienst") or "").strip():
+            return
+        now = dt.datetime.now(TZ)
+        prev = (now.replace(day=1) - dt.timedelta(days=1)).strftime("%Y-%m")
+        state = _read_state()
+        if "bericht_gesendet" not in state:  # erster Lauf: nicht nachträglich senden
+            state["bericht_gesendet"] = prev
+            _write_state(state)
+            return
+        if state["bericht_gesendet"] == prev or now.hour < int(self.opts.get("bericht_uhrzeit", 8)):
+            return
+        rep = await self.send_report(prev)
+        if rep.get("gesendet"):
+            state["bericht_gesendet"] = prev
+            _write_state(state)
+            _LOG.info("Monatsbericht %s gesendet", prev)
+
     # ------------------------------------------------------------------ Speicher
     def _storage_enabled(self) -> bool:
         o = self.opts
@@ -196,6 +273,32 @@ class Engine:
                 except ValueError:
                     vals[name] = None
             out[key] = vals
+        return out
+
+    async def _health_history(self, start: dt.datetime, end: dt.datetime) -> dict:
+        """Tagesverlauf SoH (Mittel) und Zyklenzähler je Akku aus der HA-Langzeitstatistik."""
+        out = {}
+        for key, opt in (("bestand", "akku_leistung_bestand"), ("erweiterung", "akku_leistung_erweiterung")):
+            eid = self.opts.get(opt) or ""
+            if not eid.endswith("_power"):
+                continue
+            base = eid[: -len("_power")]
+            soh_id, cyc_id = base + "_state_of_health", base + "_cycle_count"
+            try:
+                st = await self.ha.call({
+                    "type": "recorder/statistics_during_period", "start_time": start.isoformat(),
+                    "end_time": end.isoformat(), "statistic_ids": [soh_id, cyc_id], "period": "day",
+                    "types": ["mean", "state", "max"],
+                }) or {}
+            except HAError as err:
+                _LOG.debug("Gesundheitsverlauf %s: %s", key, err)
+                continue
+            soh = {dt.datetime.fromtimestamp(ts_of(r["start"]), TZ).date().isoformat(): r.get("mean")
+                   for r in st.get(soh_id, []) if r.get("mean") is not None}
+            cyc = {dt.datetime.fromtimestamp(ts_of(r["start"]), TZ).date().isoformat():
+                   (r.get("state") if r.get("state") is not None else r.get("max"))
+                   for r in st.get(cyc_id, []) if (r.get("state") is not None or r.get("max") is not None)}
+            out[key] = [{"key": k, "soh": soh.get(k), "zyklen": cyc.get(k)} for k in sorted(set(soh) | set(cyc))]
         return out
 
     async def _run_storage(self, end: dt.datetime) -> None:
@@ -228,6 +331,7 @@ class Engine:
         first = max(int(start.timestamp()), min(in_d))
         hours = list(range(first, int(end.timestamp()), 3600))
         spot_d = self.store.get(first, int(end.timestamp()))
+        co2_d = self.store.co2_get(first, int(end.timestamp()))
         pos = lambda d, h: max(0.0, d.get(h, 0.0))  # noqa: E731
         opt_pos = lambda d, h: max(0.0, d[h]) if h in d else None  # noqa: E731
         absw = lambda d, h: abs(d[h]) if h in d else None  # noqa: E731
@@ -244,12 +348,14 @@ class Engine:
             [absw(w_ext_d, h) for h in hours],
             o, TZ,
             pv_roof=[pos(roof_d, h) for h in hours] if roof_d is not None else None,
+            co2=[co2_d.get(h) for h in hours],
         )
         live = await self._battery_live()
         self.storage_rows = res["rows"]
         daily = storage.aggregate(res["rows"], TZ, "day")
         self.storage = {
             "summary": storage.summary(res, o, TZ, live),
+            "gesundheit_verlauf": await self._health_history(start, end),
             "monthly": storage.aggregate(res["rows"], TZ, "month"),
             "daily": [{"key": d["key"], "s_old": d["s_old"], "s_ext": d["s_ext"], "marg": d["marg"],
                        "s_fix": d["s_fix"], "s_pv_roof": d["s_pv_roof"], "s_pv_other": d["s_pv_other"]}
@@ -267,7 +373,7 @@ class Engine:
         b, e = s["bestand"], s["erweiterung"]
         z = e["zusatznutzen"]
         attrs = {
-            "friendly_name": "Tarifvergleich Ersparnis Batteriespeicher",
+            "friendly_name": "WattWert Ersparnis Batteriespeicher",
             "unit_of_measurement": "EUR", "device_class": "monetary", "icon": "mdi:home-battery",
             "seit": s["von"], "entladen_kwh": round(s["b_out"], 1), "ct_je_kwh": _r(s["ct_je_kwh"]),
             "letzte_12_monate": round(s["letzte_12_monate"], 2),
@@ -286,7 +392,7 @@ class Engine:
         if a.get("amortisation"):
             am = a["amortisation"]
             await self.ha.set_state("sensor.tarifvergleich_pv_anlage_ersparnis", round(a["ersparnis"], 2), {
-                "friendly_name": "Tarifvergleich Ersparnis PV-Anlage gesamt",
+                "friendly_name": "WattWert Ersparnis PV-Anlage gesamt",
                 "unit_of_measurement": "EUR", "device_class": "monetary", "icon": "mdi:solar-power-variant",
                 "seit": s["von"], "investition_eur": round(am["kosten"], 2),
                 "amortisiert_prozent": round(am["prozent"], 1), "pro_jahr_eur": round(a["pro_jahr"], 2),
@@ -450,23 +556,23 @@ class Engine:
             effects["effekt_hausakku"] = round(s["effekt_akku"], 2)
 
         await self.ha.set_state("sensor.tarifvergleich_kosten_festpreis", round(s["fix"], 2),
-                                money("Tarifvergleich Kosten Festpreis", "mdi:cash-lock"))
+                                money("WattWert Kosten Festpreis", "mdi:cash-lock"))
         await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch", round(s["dyn"], 2),
-                                money("Tarifvergleich Kosten dynamisch", "mdi:cash-clock",
+                                money("WattWert Kosten dynamisch", "mdi:cash-clock",
                                       {"preis_gewichtet_ct": _r(s["preis_gewichtet_ct"])}))
         await self.ha.set_state("sensor.tarifvergleich_ersparnis", round(s["ersparnis"], 2),
-                                money("Tarifvergleich Ersparnis dynamisch", "mdi:piggy-bank"))
+                                money("WattWert Ersparnis dynamisch", "mdi:piggy-bank"))
         if any(have.values()):
             await self.ha.set_state("sensor.tarifvergleich_kosten_dynamisch_optimiert", round(s["dyn_all"], 2),
-                                    money("Tarifvergleich Kosten dynamisch + Lastverschiebung", "mdi:cash-fast",
+                                    money("WattWert Kosten dynamisch + Lastverschiebung", "mdi:cash-fast",
                                           {"preis_gewichtet_ct": _r(s["preis_gewichtet_alle_ct"]), **effects}))
             await self.ha.set_state("sensor.tarifvergleich_ersparnis_optimiert", round(s["ersparnis_alle"], 2),
-                                    money("Tarifvergleich Ersparnis dynamisch + Lastverschiebung",
+                                    money("WattWert Ersparnis dynamisch + Lastverschiebung",
                                           "mdi:piggy-bank-outline", effects))
         m = s.get("monat")
         if m:
             await self.ha.set_state("sensor.tarifvergleich_ersparnis_monat", round(m["fix"] - m["dyn"], 2),
-                                    money("Tarifvergleich Ersparnis laufender Monat", "mdi:calendar-month",
+                                    money("WattWert Ersparnis laufender Monat", "mdi:calendar-month",
                                           {"monat": m["key"], "kosten_festpreis": round(m["fix"], 2),
                                            "kosten_dynamisch": round(m["dyn"], 2),
                                            "kosten_dynamisch_lastverschiebung": round(m["dyn_all"], 2)}))
@@ -480,7 +586,7 @@ class Engine:
                 "sensor.tarifvergleich_preis_aktuell",
                 round(cur["preis_ct"] / 100.0, 4),
                 {
-                    "friendly_name": "Tarifvergleich Strompreis dynamisch",
+                    "friendly_name": "WattWert Strompreis dynamisch",
                     "unit_of_measurement": "EUR/kWh",
                     "icon": "mdi:currency-eur",
                     "boersenpreis_ct": round(cur["spot_ct"], 3),
@@ -601,6 +707,16 @@ def build_web(engine: Engine) -> web.Application:
             von, bis = bis, von
         return web.json_response(engine.storage_range(von, bis), dumps=lambda o: json.dumps(o, default=str))
 
+    async def api_report(req):
+        """POST /api/report?monat=YYYY-MM&send=0|1 – Vorschau bzw. Versand des Monatsberichts."""
+        month = req.query.get("monat") or (dt.datetime.now(TZ).replace(day=1) - dt.timedelta(days=1)).strftime("%Y-%m")
+        if req.query.get("send") == "1":
+            rep = await engine.send_report(month)
+        else:
+            rep = engine.build_report(month) or {"fehler": f"keine Daten für {month}"}
+        return web.json_response(rep)
+
+    app.router.add_post("/api/report", api_report)
     app.router.add_get("/api/range", api_range)
     app.router.add_get("/api/storage_range", api_storage_range)
     app.router.add_post("/api/migrate", api_migrate)

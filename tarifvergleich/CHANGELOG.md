@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 – WattWert
+
+- Neuer Name **WattWert** (Kennung `tarifvergleich` und Entitäts-IDs bleiben unverändert)
+- PV-Anlage: **Autarkie**, **Eigenverbrauchsquote** und **CO₂** (stündliche CO₂-Intensität von Energy-Charts, Ersatzwert konfigurierbar)
+- **Akku-Gesundheit**: SoH und Zyklen im Verlauf, SoH-Verlust je 100 Zyklen, Restlebensdauer, Kosten je Zyklus und Verschleiß je kWh
+- **Monatsbericht** als Push-Nachricht am Monatsersten (`bericht_dienst`, `bericht_uhrzeit`), Vorschau und Testversand in der App
+- Neue Optionen `co2_faktor_g_kwh`, `akku_zyklen_lebensdauer`, `akku_soh_ende_prozent`, `bericht_dienst`, `bericht_uhrzeit`
+
 ## 0.8.0
 
 - Zeitfilter auch im Reiter PV & Speicher (Amortisation, Prognosen und Live-Werte bleiben „seit Inbetriebnahme“)

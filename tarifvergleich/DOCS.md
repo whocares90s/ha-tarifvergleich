@@ -1,4 +1,4 @@
-# Tarifvergleich
+# WattWert
 
 Rechnet für jede Stunde aus, was euer tatsächlicher Netzbezug (eBZ-Zähler, HA-Langzeitstatistik)
 mit einem **dynamischen Tarif nach Tibber-Formel** gekostet hätte – im Vergleich zum Festpreis.

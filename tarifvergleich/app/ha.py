@@ -148,6 +148,21 @@ class HAClient:
         except (aiohttp.ClientError, ValueError):
             return None
 
+    async def call_service(self, domain: str, service: str, data: dict) -> bool:
+        try:
+            async with self._session.post(
+                f"{API_URL}/services/{domain}/{service}", json=data,
+                headers={"Authorization": f"Bearer {TOKEN}"}, timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status >= 400:
+                    _LOG.warning("Dienst %s.%s fehlgeschlagen: HTTP %s %s", domain, service, resp.status,
+                                 await resp.text())
+                    return False
+                return True
+        except aiohttp.ClientError as err:
+            _LOG.warning("Dienst %s.%s fehlgeschlagen: %s", domain, service, err)
+            return False
+
     async def delete_state(self, entity_id: str) -> None:
         try:
             async with self._session.delete(

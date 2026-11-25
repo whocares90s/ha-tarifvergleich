@@ -29,7 +29,22 @@ class PriceStore:
             " n INTEGER NOT NULL,"
             " src TEXT)"
         )
+        self._db.execute("CREATE TABLE IF NOT EXISTS co2 (hour INTEGER PRIMARY KEY, g_kwh REAL NOT NULL)")
         self._db.commit()
+
+    # --- CO2-Intensität des Netzstroms (g/kWh)
+    def co2_upsert(self, rows: dict[int, tuple[float, int]]) -> None:
+        self._db.executemany("INSERT OR REPLACE INTO co2(hour, g_kwh) VALUES (?, ?)",
+                             [(h, g) for h, (g, _n) in rows.items()])
+        self._db.commit()
+
+    def co2_get(self, start_ts: int, end_ts: int) -> dict[int, float]:
+        cur = self._db.execute("SELECT hour, g_kwh FROM co2 WHERE hour >= ? AND hour < ?", (start_ts, end_ts))
+        return {int(h): float(g) for h, g in cur.fetchall()}
+
+    def co2_bounds(self) -> tuple[int | None, int | None]:
+        row = self._db.execute("SELECT MIN(hour), MAX(hour) FROM co2").fetchone()
+        return (row[0], row[1]) if row else (None, None)
 
     def upsert(self, rows: dict[int, tuple[float, int]], src: str) -> None:
         self._db.executemany(
@@ -88,6 +103,40 @@ async def _awattar(session: aiohttp.ClientSession, day_from: dt.date, day_to: dt
         for t in range(s, e, step):
             points.append((t, item["marketprice"]))
     return points
+
+
+async def refresh_co2(store: PriceStore, session: aiohttp.ClientSession, start_date: dt.date) -> None:
+    """CO2-Intensität (Energy-Charts /co2eq, DE) ab start_date bis gestern nachladen."""
+    first, last = store.co2_bounds()
+    yesterday = dt.datetime.now(BERLIN).date() - dt.timedelta(days=1)
+    if first is None or last is None or dt.datetime.fromtimestamp(first, BERLIN).date() > start_date:
+        day = start_date
+    else:
+        day = dt.datetime.fromtimestamp(last, BERLIN).date() - dt.timedelta(days=1)
+    while day <= yesterday:
+        chunk_end = min(day + dt.timedelta(days=30), yesterday)
+        params = {"country": "de", "start": day.isoformat(), "end": chunk_end.isoformat()}
+        for attempt in range(3):
+            try:
+                async with session.get("https://api.energy-charts.info/co2eq", params=params, timeout=TIMEOUT) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json(content_type=None)
+                rows = _aggregate(zip(data.get("unix_seconds") or [], data.get("co2eq") or []))
+                if rows:
+                    store.co2_upsert(rows)
+                    _LOG.info("CO2 %s–%s geladen (%d Stunden)", day, chunk_end, len(rows))
+                break
+            except aiohttp.ClientResponseError as err:
+                if err.status == 429 and attempt < 2:
+                    await asyncio.sleep(10 * (attempt + 1))
+                    continue
+                _LOG.warning("CO2 %s–%s fehlgeschlagen: %s", day, chunk_end, err)
+                break
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                _LOG.warning("CO2 %s–%s fehlgeschlagen: %s", day, chunk_end, err)
+                break
+        day = chunk_end + dt.timedelta(days=1)
+        await asyncio.sleep(1)
 
 
 async def refresh(store: PriceStore, session: aiohttp.ClientSession, start_date: dt.date) -> None:
