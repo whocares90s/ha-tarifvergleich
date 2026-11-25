@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- PV & Speicher nutzt eigene Netzzähler (Standard: Deye), weil die eBZ-Daten vor Feb. 2026 nur als Tageswerte importiert sind
+
 ## 0.5.0
 
 - Reiter heißt jetzt **PV & Speicher** und zeigt zusätzlich die **gesamte PV-Anlage**: Ersparnis gegenüber

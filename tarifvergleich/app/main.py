@@ -205,8 +205,11 @@ class Engine:
         start = dt.datetime.combine(dt.date.fromisoformat(o["speicher_bestand_start"]), dt.time(0), TZ)
         pv_ids = [s for s in (o.get("pv_statistiken") or []) if s]
         roof_id = o.get("pv_dach_statistik") or ""
-        ids = [o["akku_statistik_laden"], o["akku_statistik_entladen"], o["statistik_netzbezug"],
-               o["statistik_einspeisung"], *pv_ids]
+        # eigene Netzzähler für die Langzeitauswertung (z. B. Wechselrichter), weil nachträglich
+        # importierte Zählerdaten oft nur Tageswerte haben
+        imp_id = o.get("speicher_statistik_netzbezug") or o["statistik_netzbezug"]
+        exp_id = o.get("speicher_statistik_einspeisung") or o["statistik_einspeisung"]
+        ids = [o["akku_statistik_laden"], o["akku_statistik_entladen"], imp_id, exp_id, *pv_ids]
         if roof_id and roof_id not in ids:
             ids.append(roof_id)
         stats = await self.ha.statistics(ids, start, end, ["change"], {"energy": "kWh"})
@@ -217,8 +220,8 @@ class Engine:
         if not in_d:
             raise HAError(f"Keine Statistik für {o['akku_statistik_laden']} gefunden")
         out_d = _series(stats, o["akku_statistik_entladen"], "change")
-        imp_d = _series(stats, o["statistik_netzbezug"], "change")
-        exp_d = _series(stats, o["statistik_einspeisung"], "change")
+        imp_d = _series(stats, imp_id, "change")
+        exp_d = _series(stats, exp_id, "change")
         pv_ds = [_series(stats, sid, "change") for sid in pv_ids]
         roof_d = _series(stats, roof_id, "change") if roof_id else None
         w_old_d = _series(p_stats, o.get("akku_leistung_bestand") or "", "mean")
