@@ -51,6 +51,19 @@ Ersparnis = Entladung × Bezugspreis − PV-Ladung × Einspeisevergütung − Ne
   (Simulation mit realem Ausbau vs. gemessen) wird mit angezeigt.
 - Amortisation je Speicher, wenn Anschaffungskosten eingetragen sind.
 
+## Abschlag Ist/Soll
+
+Mit `abschlag_eur_monat` und `abschlag_kwh_jahr` zeigt die Übersicht, wie der Netzbezug im laufenden
+Vertragsjahr (Beginn: `abschlag_vertragsbeginn`, sonst letzter Eintrag der Bezugspreis-Historie) zur
+vereinbarten Jahresmenge steht.
+
+- **Saisonal** (Hauptvariante, auch im Monatsbericht): die Jahresmenge wird nach dem Ø Tagesbezug des
+  jeweils letzten vollständigen gleichnamigen Monats verteilt. Jeder abgeschlossene Monat ersetzt den
+  Vorjahreswert – das Profil lernt mit.
+- **Gleichmäßig** (optional, `abschlag_linear_anzeigen`): Jahresmenge / Tage.
+- Prognose = Ist / bisheriger Soll-Anteil, bewertet mit aktuellem Arbeits- und Grundpreis, gegen
+  12 × Abschlag → Nachzahlung oder Guthaben und passender Abschlag.
+
 ## Ergebnisse in Home Assistant
 
 Sensoren (werden stündlich gesetzt):
@@ -59,6 +72,7 @@ Sensoren (werden stündlich gesetzt):
 - `sensor.tarifvergleich_kosten_dynamisch_optimiert` (alle Maßnahmen, Einzeleffekte als Attribute)
 - `sensor.tarifvergleich_ersparnis`, `_ersparnis_optimiert`, `_ersparnis_monat`
 - `sensor.tarifvergleich_preis_aktuell` (EUR/kWh, Attribute `heute`/`morgen` mit Stundenpreisen)
+- `sensor.tarifvergleich_abschlag_prognose` (EUR, Nachzahlung + / Guthaben −, Details als Attribute)
 
 Langzeitstatistiken (rückwirkend, für Statistik-Diagramm-Karten):
 

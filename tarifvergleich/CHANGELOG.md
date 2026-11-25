@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+- **Abschlag Ist/Soll** in der Übersicht: Netzbezug im Vertragsjahr gegen die vereinbarte Jahresmenge, saisonal nach eigenem Monatsprofil (lernt mit jedem abgeschlossenen Monat) und optional gleichmäßig verteilt
+- Prognose Jahresverbrauch, Jahresabrechnung, Nachzahlung/Guthaben und passender Abschlag; Block im Monatsbericht (saisonal)
+- Neuer Sensor `sensor.tarifvergleich_abschlag_prognose` (Nachzahlung positiv, Guthaben negativ)
+- Neue Optionen `abschlag_eur_monat`, `abschlag_kwh_jahr`, `abschlag_vertragsbeginn`, `abschlag_linear_anzeigen`
+
 ## 0.9.1
 
 - Standard-Wirkungsgrad Akku 0,87 (Rundlauf inkl. Wechselrichter), Beschreibung ergänzt

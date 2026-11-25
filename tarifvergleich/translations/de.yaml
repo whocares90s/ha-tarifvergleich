@@ -148,6 +148,17 @@ configuration:
   akku_soh_ende_prozent:
     name: Akku – Lebensende bei SoH (%)
     description: Ab diesem Gesundheitswert gilt ein Akku als verbraucht (typisch 70–80 %).
+  abschlag_eur_monat:
+    name: Abschlag – monatlicher Betrag (€, 0 = aus)
+  abschlag_kwh_jahr:
+    name: Abschlag – vereinbarte Jahresmenge (kWh)
+    description: Verbrauch, nach dem der Versorger den Abschlag berechnet hat.
+  abschlag_vertragsbeginn:
+    name: Abschlag – Beginn des Vertragsjahres (YYYY-MM-DD, optional)
+    description: Leer = Datum des letzten Eintrags der Bezugspreis-Historie.
+  abschlag_linear_anzeigen:
+    name: Abschlag – gleichmäßige Verteilung zusätzlich anzeigen
+    description: Hauptvariante ist das saisonale Soll nach eigenem Monatsprofil (auch im Monatsbericht). An = in der Übersicht zusätzlich die Variante „gleichmäßig über das Jahr“.
   bericht_dienst:
     name: Monatsbericht – Benachrichtigungsdienst
     description: z. B. notify.mobile_app_handy. Leer = kein Monatsbericht.

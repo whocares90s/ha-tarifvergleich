@@ -12,7 +12,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import config, migrate, prices, sim, storage
+from . import abschlag, config, migrate, prices, sim, storage
 from .ha import HAClient, HAError, ts_of
 
 _LOG = logging.getLogger("tarifvergleich")
@@ -100,6 +100,7 @@ class Engine:
         self.profile: list[dict] = []
         self.summary: dict = {}
         self.storage: dict = {}
+        self.abschlag: dict | None = None
         self.storage_rows: list[dict] = []
         self.storage_error: str | None = None
         self.last_error: str | None = None
@@ -176,6 +177,11 @@ class Engine:
         self.monthly = sim.aggregate(rows, TZ, "month")
         self.profile = sim.hour_profile(rows, TZ)
         self.summary = self._summary(res, bool(pv_ids))
+        try:
+            self.abschlag = abschlag.compute(hours, imp, o, TZ, int(end.timestamp()))
+        except Exception:  # noqa: BLE001
+            self.abschlag = None
+            _LOG.exception("Abschlag-Auswertung fehlgeschlagen")
         s = self.summary
         _LOG.info(
             "Rechenlauf: %d h, fix %.2f €, dyn %.2f €, Effekte E-Auto %.2f / WP %.2f / Akku %.2f / alle %.2f €",
@@ -221,7 +227,26 @@ class Engine:
             be_txt = f", Break-even {MONATE[int(be[5:7]) - 1]} {be[:4]}" if be and a["rest_eur"] > 0 else ""
             lines.append(f"Amortisation {_de(a['prozent'], 0)} %{be_txt}" if a["rest_eur"] > 0
                          else "Anlage ist amortisiert 🎉")
+        lines.extend(self._report_abschlag(month_key))
         return {"title": title, "message": "\n".join(lines)}
+
+    def _report_abschlag(self, month_key: str) -> list[str]:
+        ab = self.abschlag
+        if not ab:
+            return []
+        m = next((x for x in ab["monate"] if x["key"] == month_key), None)
+        if not m:
+            return []
+        s = ab["saison"]
+        pct = lambda a, b: f"{(a / b - 1) * 100:+.0f} %".replace("-", "−") if b > 0 else "–"  # noqa: E731
+        out = [f"Abschlag: {MONATE[int(month_key[5:7]) - 1]} {_de(m['ist'], 0)} kWh "
+               f"(Soll {_de(m['soll_s'], 0)} kWh, {pct(m['ist'], m['soll_s'])}), "
+               f"Vertragsjahr bisher {_de(ab['ist_kwh'], 0)} von {_de(s['soll_kwh'], 0)} kWh ({pct(ab['ist_kwh'], s['soll_kwh'])})"]
+        if s["saldo_eur"] is not None:
+            what = "Nachzahlung" if s["saldo_eur"] > 0 else "Guthaben"
+            out.append(f"Prognose Jahresabrechnung: {what} ca. {_eur(abs(s['saldo_eur']))} "
+                       f"(passender Abschlag {_eur(s['abschlag_passend'])})" + (" – noch unsicher" if ab["unsicher"] else ""))
+        return out
 
     async def send_report(self, month_key: str) -> dict:
         rep = self.build_report(month_key)
@@ -577,6 +602,20 @@ class Engine:
                                            "kosten_dynamisch": round(m["dyn"], 2),
                                            "kosten_dynamisch_lastverschiebung": round(m["dyn_all"], 2)}))
 
+        ab = self.abschlag
+        if ab and ab["saison"]["saldo_eur"] is not None:
+            s_, l_ = ab["saison"], ab["linear"]
+            await self.ha.set_state(
+                "sensor.tarifvergleich_abschlag_prognose", round(s_["saldo_eur"], 2),
+                {"friendly_name": "WattWert Abschlag Prognose (Nachzahlung +/Guthaben −)", "unit_of_measurement": "EUR",
+                 "device_class": "monetary", "icon": "mdi:file-document-check-outline",
+                 "vertrag_von": ab["start"], "vertrag_bis": ab["ende"], "ist_kwh": round(ab["ist_kwh"], 1),
+                 "soll_kwh": round(s_["soll_kwh"], 1), "abweichung_prozent": _r(s_["abw_pct"], 1),
+                 "prognose_kwh": round(s_["prog_kwh"], 0), "prognose_jahreskosten": round(s_["prog_eur"], 2),
+                 "abschlag_passend": round(s_["abschlag_passend"], 2),
+                 "linear_soll_kwh": round(l_["soll_kwh"], 1), "linear_prognose_kwh": round(l_["prog_kwh"], 0),
+                 "linear_saldo": round(l_["saldo_eur"], 2), "unsicher": ab["unsicher"]})
+
         fut = self.future_prices()
         now_h = int(dt.datetime.now(dt.timezone.utc).timestamp()) // 3600 * 3600
         cur = next((p for p in fut if p["t"] == now_h), None)
@@ -652,6 +691,7 @@ def build_web(engine: Engine) -> web.Application:
                 "tarif": sim.breakdown(engine.opts),
                 "optionen": {k: engine.opts.get(k) for k in OPTION_KEYS},
                 "speicher": engine.storage,
+                "abschlag": engine.abschlag,
                 "status": {"letzter_lauf": engine.last_run, "fehler": engine.last_error,
                            "speicher_fehler": engine.storage_error, "laeuft": engine.busy.locked()},
             },

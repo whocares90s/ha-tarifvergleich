@@ -104,6 +104,16 @@
   <div class="view" id="view-overview">
     <div class="grid kpis" id="kpis"></div>
 
+    <section class="card" id="abBox" hidden style="margin-bottom:12px">
+      <div class="row"><h2 style="margin:0" id="abTitle">Abschlag Ist/Soll</h2><span class="muted" id="abSub"></span></div>
+      <div class="grid kpis" id="abKpis"></div>
+      <section class="grid two">
+        <div><div class="chart"><canvas id="cAbschlag"></canvas></div></div>
+        <div class="scroll"><table id="tAbschlag"></table></div>
+      </section>
+      <div class="note" id="abNote"></div>
+    </section>
+
     <section class="grid two">
       <div class="card"><h2 data-gt="Kosten je {p}">Kosten je Monat</h2><div class="chart"><canvas id="cMonthly"></canvas></div></div>
       <div class="card"><h2>Kumulierte Ersparnis gegenüber Festpreis</h2><div class="chart"><canvas id="cCum"></canvas></div></div>
@@ -437,6 +447,7 @@ function render(d) {
 // ------------------------------------------------------------------ Übersicht
 function renderOverview(d) {
   const s = d.summary, t = d.tarif, M = d.monthly, D = d.daily, has = present(d).length > 0;
+  renderAbschlag(d.abschlag);
   document.getElementById("kpis").innerHTML =
     kpi("Festpreis", eur(s.fix), `${t.preis_historie && t.preis_historie.length > 1 ? "nach Tarifhistorie" : ct(t.fix_ct_brutto) + "/kWh"} · ${kwh(s.imp)}`, "", "--fix") +
     kpi("Dynamisch", eur(s.dyn), `Ø ${ct(s.preis_gewichtet_ct)}/kWh`, "", "--dyn") +
@@ -479,6 +490,56 @@ function renderOverview(d) {
     <dt>Break-even Börsenpreis (netto) ggü. ${ct(t.fix_ct_brutto)}</dt><dd>${ct(t.break_even_spot_ct)}</dd>
     ${Object.entries(t.dyn_grundpreis_teile).map(([k, v]) => `<dt>${k}</dt><dd>${eur(v)}/Jahr</dd>`).join("")}
     <dt><b>Grundpreise dynamisch / fix</b></dt><dd><b>${eur(t.dyn_grundpreis_eur_jahr)} / ${eur(t.fix_grundpreis_eur_jahr)}</b></dd>`;
+}
+
+// ------------------------------------------------------------------ Abschlag Ist/Soll (immer Vertragsjahr, unabhängig vom Filter)
+function renderAbschlag(A) {
+  const box = document.getElementById("abBox");
+  box.hidden = !A;
+  if (!A) return;
+  const S = A.saison, L = A.linear, showL = A.linear_anzeigen;
+  const dmy = s => new Date(s + "T00:00").toLocaleDateString("de-DE");
+  const pctTxt = v => v == null ? "–" : (v >= 0 ? "+" : "−") + num(Math.abs(v), 0) + " %";
+  const saldo = v => v == null ? "–" : (v > 0 ? "Nachzahlung " : "Guthaben ") + eur(Math.abs(v));
+  document.getElementById("abSub").textContent =
+    `Vertragsjahr ${dmy(A.start)} – ${dmy(A.ende)} · Tag ${num(Math.min(A.tag, A.tage), 0)} von ${A.tage} · ${eur(A.abschlag_monat)}/Monat für ${kwh(A.kwh_jahr)}/Jahr`;
+  const k = [
+    kpi("Verbrauch Ist / Soll", `${kwh(A.ist_kwh)}`, `Soll saisonal ${kwh(S.soll_kwh)} · ${pctTxt(S.abw_pct)}` +
+      (showL ? `<br>gleichmäßig ${kwh(L.soll_kwh)} · ${pctTxt(L.abw_pct)}` : ""), S.abw_pct == null ? "" : sign(-S.abw_pct), "--dyn"),
+    kpi("Kosten bisher / Abschläge", eur(A.ist_eur), `gezahlt (anteilig) ${eur(A.abschlag_bisher)}`, sign(A.abschlag_bisher - A.ist_eur), "--fix"),
+    kpi("Prognose Jahresverbrauch", kwh(S.prog_kwh), `saisonal` + (showL ? ` · gleichmäßig ${kwh(L.prog_kwh)}` : "")),
+    kpi("Prognose Abrechnung", saldo(S.saldo_eur), `Jahreskosten ${eur(S.prog_eur)} ggü. ${eur(A.abschlag_jahr)}` +
+      (showL ? `<br>gleichmäßig: ${saldo(L.saldo_eur)}` : ""), S.saldo_eur == null ? "" : sign(-S.saldo_eur)),
+    kpi("Passender Abschlag", eur(S.abschlag_passend), `statt ${eur(A.abschlag_monat)}` + (showL ? ` · gleichmäßig ${eur(L.abschlag_passend)}` : "")),
+  ];
+  document.getElementById("abKpis").innerHTML = k.join("");
+
+  const V = A.verlauf;
+  const ds = [
+    { label: "Ist", data: V.map(x => x.ist), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2.5 },
+    { label: "Soll saisonal", data: V.map(x => x.soll_s), borderColor: css("--fix"), pointRadius: 0, borderWidth: 1.5 },
+    { label: "Prognose saisonal", data: V.map(x => x.prog_s), borderColor: css("--dyn"), borderDash: [5, 4], pointRadius: 0, borderWidth: 1.5 },
+  ];
+  if (showL) ds.push(
+    { label: "Soll gleichmäßig", data: V.map(x => x.soll_l), borderColor: css("--muted"), borderDash: [2, 3], pointRadius: 0, borderWidth: 1 },
+    { label: "Prognose gleichmäßig", data: V.map(x => x.prog_l), borderColor: css("--price"), borderDash: [5, 4], pointRadius: 0, borderWidth: 1 });
+  chart("cAbschlag", { type: "line", data: { labels: V.map(x => dmy(x.d).slice(0, 6)), datasets: ds },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: kwhAxis() },
+      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${kwh(c.parsed.y)}` } } } } });
+
+  document.getElementById("tAbschlag").innerHTML =
+    `<tr><th>Monat</th><th>Ist</th><th>Soll saisonal</th><th>Δ</th>${showL ? "<th>Soll gleichm.</th><th>Δ</th>" : ""}</tr>` +
+    A.monate.map(m => `<tr><td>${monthName(m.key)}${m.voll ? "" : " (lfd.)"}</td><td>${kwh(m.ist)}</td><td>${kwh(m.soll_s)}</td>
+      <td class="${sign(m.soll_s - m.ist)}">${pctTxt(m.soll_s ? (m.ist / m.soll_s - 1) * 100 : null)}</td>
+      ${showL ? `<td>${kwh(m.soll_l)}</td><td class="${sign(m.soll_l - m.ist)}">${pctTxt(m.soll_l ? (m.ist / m.soll_l - 1) * 100 : null)}</td>` : ""}</tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(A.ist_kwh)}</th><th>${kwh(S.soll_kwh)}</th><th>${pctTxt(S.abw_pct)}</th>${showL ? `<th>${kwh(L.soll_kwh)}</th><th>${pctTxt(L.abw_pct)}</th>` : ""}</tr>`;
+
+  const src = A.profil.filter(p => p.quelle).map(p => monthName(p.quelle)).join(", ");
+  document.getElementById("abNote").innerHTML =
+    (A.unsicher ? "<b>Noch wenige Tage im Vertragsjahr – die Prognose schwankt stark.</b> " : "") +
+    `Ist = Netzbezug (eBZ) seit Vertragsbeginn. Soll saisonal = Jahresmenge verteilt nach eurem Monatsprofil (Ø Tagesbezug des jeweils letzten vollständigen Monats: ${src}); ` +
+    `das Profil aktualisiert sich mit jedem abgeschlossenen Monat. Prognose = bisherige Abweichung auf das restliche Jahr übertragen, ` +
+    `bewertet mit ${ct(A.arbeitspreis_ct)}/kWh + ${eur(A.grundpreis_eur_jahr)} Grundpreis. Abschläge tageweise anteilig gerechnet. Gilt unabhängig vom Zeitfilter.`;
 }
 
 // ------------------------------------------------------------------ Lastverschiebung

@@ -1,5 +1,5 @@
 name: WattWert
-version: "0.9.1"
+version: "0.10.0"
 slug: tarifvergleich
 description: Was ist jede kWh wert? Tarifvergleich fix vs. dynamisch, Lastverschiebung, PV- und Speicher-Wirtschaftlichkeit.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -83,6 +83,10 @@ options:
   co2_faktor_g_kwh: 380
   akku_zyklen_lebensdauer: 6000
   akku_soh_ende_prozent: 70
+  abschlag_eur_monat: 140
+  abschlag_kwh_jahr: 5100
+  abschlag_vertragsbeginn: ""
+  abschlag_linear_anzeigen: true
   bericht_dienst: notify.mobile_app_s25_ultra_joe
   bericht_uhrzeit: 8
   log_level: info
@@ -151,6 +155,10 @@ schema:
   co2_faktor_g_kwh: float
   akku_zyklen_lebensdauer: int
   akku_soh_ende_prozent: float(0,100)
+  abschlag_eur_monat: float?
+  abschlag_kwh_jahr: float?
+  abschlag_vertragsbeginn: str?
+  abschlag_linear_anzeigen: bool
   bericht_dienst: str?
   bericht_uhrzeit: int(0,23)
   log_level: list(debug|info|warning|error)
