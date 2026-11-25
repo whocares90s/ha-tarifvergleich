@@ -173,7 +173,7 @@
       <p class="intro" id="stSysIntro"></p>
       <div class="grid kpis" id="stSysKpis"></div>
       <section class="card" style="margin-bottom:16px">
-        <h2>Ersparnis der Anlage je Monat</h2>
+        <h2 data-gt="Ersparnis der Anlage je {p}">Ersparnis der Anlage je Monat</h2>
         <div class="chart"><canvas id="cStSystem"></canvas></div>
       </section>
     </div>
@@ -183,12 +183,12 @@
     <div class="grid kpis" id="stKpis"></div>
 
     <section class="grid two">
-      <div class="card"><h2>Ersparnis je Monat</h2><div class="chart"><canvas id="cStMonthly"></canvas></div></div>
-      <div class="card"><h2>Energieflüsse des Speichers je Monat</h2><div class="chart"><canvas id="cStFlows"></canvas></div></div>
+      <div class="card"><h2 data-gt="Ersparnis je {p}">Ersparnis je Monat</h2><div class="chart"><canvas id="cStMonthly"></canvas></div></div>
+      <div class="card"><h2 data-gt="Energieflüsse des Speichers je {p}">Energieflüsse des Speichers je Monat</h2><div class="chart"><canvas id="cStFlows"></canvas></div></div>
     </section>
 
     <section class="card">
-      <h2>Amortisation</h2>
+      <h2>Amortisation <span class="muted" style="font-weight:400">· immer seit Inbetriebnahme</span></h2>
       <div class="chart"><canvas id="cStAmort"></canvas></div>
       <div class="note" id="stAmortNote"></div>
     </section>
@@ -196,7 +196,7 @@
     <section class="grid three" id="stCards"></section>
 
     <section class="card">
-      <h2>Monatsübersicht Speicher</h2>
+      <h2 data-gt="{P}übersicht Speicher">Monatsübersicht Speicher</h2>
       <div class="scroll"><table id="tStorage"></table></div>
     </section>
 
@@ -259,8 +259,8 @@ function showView(v) {
     try { localStorage.setItem("tv-view", v); } catch (e) {}
     document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
     document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
-    document.getElementById("filterBar").hidden = true;
-    if (DATA) renderStorage(DATA);
+    document.getElementById("filterBar").hidden = !BOUNDS;
+    if (DATA && BOUNDS) loadRange(); else if (DATA) renderStorage(DATA, null);
     return;
   }
   VIEW = v;
@@ -348,10 +348,23 @@ function applyFilter() {
   loadRange();
 }
 
+let SRANGE = null;
 async function loadRange() {
   if (!BOUNDS) return;
   renderFilterCtl();
   const [von, bis] = rangeOf(FILTER);
+  if (VIEW === "storage") {
+    try { SRANGE = await fetch(`api/storage_range?von=${von}&bis=${bis}`).then(r => r.json()); }
+    catch (e) { SRANGE = null; }
+    GRAN = SRANGE ? SRANGE.granularitaet : "month";
+    const n = SRANGE ? SRANGE.summary.stunden : 0;
+    document.getElementById("fLabel").textContent = (FILTER.mode === "day" ? dateDE(von) : `${dateDE(von)} – ${dateDE(bis)}`) +
+      (n ? ` · ${num(n / 24, 0)} Tage mit Daten` : " · keine Daten");
+    const [p, P] = GR[GRAN];
+    document.querySelectorAll("#view-storage [data-gt]").forEach(h => h.textContent = h.dataset.gt.replace("{p}", p).replace("{P}", P));
+    renderStorage(DATA, SRANGE);
+    return;
+  }
   try { RANGE = await fetch(`api/range?von=${von}&bis=${bis}`).then(r => r.json()); }
   catch (e) { RANGE = null; return; }
   GRAN = RANGE.granularitaet;
@@ -539,9 +552,19 @@ function renderShift(d) {
 const dateDE = s => s ? new Date(s.length === 10 ? s + "T12:00:00" : s).toLocaleDateString("de-DE") : "–";
 const years = v => v == null ? "–" : v.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " Jahre";
 
-function renderStorage(d) {
-  const S = d.speicher.summary, M = d.speicher.monthly, D = d.speicher.daily;
+function renderStorage(d, R) {
+  const G = d.speicher.summary, D = d.speicher.daily;
+  const filtered = !!(R && R.summary && !R.summary.gesamt);
+  // Im Filter: Summen des Zeitraums, Amortisation/Prognosen/Live-Werte bleiben „seit Inbetriebnahme“
+  const S = filtered ? Object.assign({}, G, R.summary) : G;
+  const M = R ? R.buckets : d.speicher.monthly;
   const B = S.bestand, E = S.erweiterung, Z = E.zusatznutzen || {};
+  const tag = filtered ? "im Zeitraum" : "gesamt";
+  if (filtered && !R.summary.stunden) {
+    document.getElementById("stSysKpis").innerHTML = document.getElementById("stKpis").innerHTML =
+      `<div class="card empty" style="grid-column:1/-1">Keine Daten im gewählten Zeitraum.</div>`;
+    return;
+  }
   const hasExt = !!E.start && E.kwh > 0;
   const err = document.getElementById("stError");
   err.hidden = !d.status.speicher_fehler; err.textContent = d.status.speicher_fehler ? "Fehler in der Speicher-Auswertung: " + d.status.speicher_fehler : "";
@@ -559,15 +582,17 @@ function renderStorage(d) {
     document.getElementById("stSysIntro").textContent =
       `Ersparnis gegenüber „ganz ohne PV“ seit ${dateDE(S.von)}: selbst verbrauchter PV-Strom zum Bezugspreis, Einspeisung mit ${ct(S.einspeiseverguetung_ct)}, ` +
       `dazu der Mehrwert der Speicher. Investition: PV ${eur(A.kosten_pv)}${other ? " (inkl. Garagen-PV)" : ""} + Speicher ${eur((B.amortisation || {}).kosten || 0)} + ${eur((E.amortisation || {}).kosten || 0)}.`;
+    const sysVal = filtered ? S.s_pv_roof + S.s_fix + (A.weitere_eingerechnet ? S.s_pv_other : 0) : A.ersparnis;
     document.getElementById("stSysKpis").innerHTML =
-      kpi("Ersparnis Gesamtanlage", eur(A.ersparnis), `${num(AM.prozent, 0)} % von ${eur(AM.kosten)} amortisiert`, sign(A.ersparnis), "--all") +
+      kpi(`Ersparnis Gesamtanlage ${filtered ? "im Zeitraum" : ""}`, eur(sysVal),
+        filtered ? `insgesamt ${eur(A.ersparnis)} · ${num(AM.prozent, 0)} % amortisiert` : `${num(AM.prozent, 0)} % von ${eur(AM.kosten)} amortisiert`, sign(sysVal), "--all") +
       kpi("Pro Jahr (letzte 12 Monate)", eur(A.pro_jahr), `Amortisation gesamt ${years(AM.gesamt_jahre)}`) +
       kpi("Break-even", AM.rest_eur <= 0 ? "erreicht" : (AM.break_even ? new Date(AM.break_even + "T12:00:00").toLocaleDateString("de-DE", { month: "long", year: "numeric" }) : "–"),
         AM.rest_eur > 0 ? `noch ${eur(AM.rest_eur)} · ${years(AM.rest_jahre)}` : "") +
       kpi("Dach-PV direkt", eur(S.s_pv_roof), `Eigenverbrauch + Einspeisung`, "", "--price") +
       (S.s_pv_other > 0.5 ? kpi("Garagen-PV", eur(S.s_pv_other), A.weitere_eingerechnet ? "in der Investition enthalten" : "nicht eingerechnet", "", "--wp") : "") +
       kpi("Speicher (Mehrwert)", eur(S.s_fix), "Bestand + Erweiterung", "", "--bat");
-    chart("cStSystem", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+    chart("cStSystem", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
       { label: "Dach-PV direkt", data: M.map(m => m.s_pv_roof), backgroundColor: css("--price"), stack: "s" },
       ...(S.s_pv_other > 0.5 ? [{ label: "Garagen-PV", data: M.map(m => m.s_pv_other), backgroundColor: css("--wp"), stack: "s" }] : []),
       { label: "Bestandsakku", data: M.map(m => m.s_old), backgroundColor: css("--dyn"), stack: "s" },
@@ -575,20 +600,20 @@ function renderStorage(d) {
       options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
   }
   document.getElementById("stKpis").innerHTML =
-    kpi("Ersparnis gesamt", eur(S.s_fix), `${kwh(S.b_out)} entladen · Ø ${ct(S.ct_je_kwh)} je kWh`, sign(S.s_fix), "--bat") +
-    kpi("Letzte 12 Monate", eur(S.letzte_12_monate), "") +
+    kpi(`Ersparnis ${tag}`, eur(S.s_fix), `${kwh(S.b_out)} entladen · Ø ${ct(S.ct_je_kwh)} je kWh`, sign(S.s_fix), "--bat") +
+    kpi("Letzte 12 Monate", eur(G.letzte_12_monate), filtered ? "unabhängig vom Filter" : "") +
     kpi(`Bestandsakku ${num(B.kwh)} kWh`, eur(S.s_old), amortSub(B.amortisation), sign(S.s_old), "--dyn") +
-    (hasExt ? kpi(`Erweiterung ${num(E.kwh)} kWh – anteilig`, eur(E.anteilig), `seit ${dateDE(E.start)} · nach Durchsatz`, sign(E.anteilig), "--ev") +
-      kpi("Erweiterung – Zusatznutzen", eur(Z.seit_inbetriebnahme_eur), `hochgerechnet ${eur(Z.pro_jahr_eur)}/Jahr · ${amortSub(E.amortisation)}`, sign(Z.seit_inbetriebnahme_eur || 0), "--ev") : "") +
-    kpi("Mit dynamischem Tarif bewertet", eur(S.dyn), `statt ${eur(S.dyn_fix_vergleich)} zum Festpreis (seit ${dateDE(S.dyn_von)})`);
+    (hasExt ? kpi(`Erweiterung ${num(E.kwh)} kWh – anteilig`, eur(filtered ? S.s_ext : E.anteilig), `seit ${dateDE(E.start)} · nach Durchsatz`, sign(filtered ? S.s_ext : E.anteilig), "--ev") +
+      kpi("Erweiterung – Zusatznutzen", eur(filtered ? S.marg : Z.seit_inbetriebnahme_eur), `hochgerechnet ${eur(Z.pro_jahr_eur)}/Jahr · ${amortSub(E.amortisation)}`, sign((filtered ? S.marg : Z.seit_inbetriebnahme_eur) || 0), "--ev") : "") +
+    kpi("Mit dynamischem Tarif bewertet", eur(S.dyn), `statt ${eur(S.dyn_fix_vergleich)} zum Festpreis (${filtered ? "im Zeitraum" : "seit " + dateDE(S.dyn_von)})`);
 
-  chart("cStMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+  chart("cStMonthly", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
     { label: "Bestandsakku", data: M.map(m => m.s_old), backgroundColor: css("--dyn"), stack: "s" },
     ...(hasExt ? [{ label: "Erweiterung (anteilig)", data: M.map(m => m.s_ext), backgroundColor: css("--ev"), stack: "s" },
       { type: "line", label: "Zusatznutzen Erweiterung", data: M.map(m => m.marg || null), borderColor: css("--price"), pointRadius: 3, borderWidth: 2 }] : []) ] },
     options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
 
-  chart("cStFlows", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+  chart("cStFlows", { type: "bar", data: { labels: M.map(m => lbl(m.key)), datasets: [
     { label: "Ladung aus PV", data: M.map(m => m.pvc), backgroundColor: css("--good"), stack: "in" },
     { label: "Ladung aus Netz", data: M.map(m => m.gc), backgroundColor: css("--bad"), stack: "in" },
     { label: "Entladung", data: M.map(m => m.b_out), backgroundColor: css("--bat"), stack: "out" } ] },
@@ -642,13 +667,13 @@ function renderStorage(d) {
   document.getElementById("stCards").innerHTML = cards.join("");
 
   document.getElementById("tStorage").innerHTML =
-    `<tr><th>Monat</th><th>Ladung PV</th><th>Ladung Netz</th><th>Entladung</th><th>vermiedener Bezug</th><th>entgangene Einspeisung</th><th>Netzladekosten</th><th>Ersparnis</th>${hasExt ? "<th>davon Erweiterung</th><th>Zusatznutzen</th>" : ""}<th>dyn. bewertet</th></tr>` +
-    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.pvc)}</td><td>${kwh(m.gc)}</td><td>${kwh(m.b_out)}</td>
+    `<tr><th>${GR[GRAN][0]}</th><th>Ladung PV</th><th>Ladung Netz</th><th>Entladung</th><th>vermiedener Bezug</th><th>entgangene Einspeisung</th><th>Netzladekosten</th><th>Ersparnis</th>${hasExt ? "<th>davon Erweiterung</th><th>Zusatznutzen</th>" : ""}<th>dyn. bewertet</th></tr>` +
+    M.map(m => `<tr><td>${lbl(m.key)}</td><td>${kwh(m.pvc)}</td><td>${kwh(m.gc)}</td><td>${kwh(m.b_out)}</td>
       <td>${eur(m.avoided)}</td><td>${eur(-m.lost_feed)}</td><td>${eur(-m.grid_cost)}</td><td class="${sign(m.s_fix)}"><b>${eur(m.s_fix)}</b></td>
       ${hasExt ? `<td>${m.s_ext ? eur(m.s_ext) : "–"}</td><td>${m.marg ? eur(m.marg) : "–"}</td>` : ""}
       <td>${m.dyn_hours ? eur(m.s_dyn) : "–"}</td></tr>`).join("") +
     `<tr><th>Summe</th><th>${kwh(S.pvc)}</th><th>${kwh(S.gc)}</th><th>${kwh(S.b_out)}</th><th>${eur(S.avoided)}</th><th>${eur(-S.lost_feed)}</th><th>${eur(-S.grid_cost)}</th><th>${eur(S.s_fix)}</th>
-      ${hasExt ? `<th>${eur(S.s_ext)}</th><th>${eur(Z.seit_inbetriebnahme_eur)}</th>` : ""}<th>${eur(S.dyn)}</th></tr>`;
+      ${hasExt ? `<th>${eur(S.s_ext)}</th><th>${eur(filtered ? S.marg : Z.seit_inbetriebnahme_eur)}</th>` : ""}<th>${eur(S.dyn)}</th></tr>`;
 
   document.getElementById("stMethod").innerHTML = `
     Für jede Stunde: <b>Ersparnis = Entladung × Bezugspreis − PV-Ladung × Einspeisevergütung − Netzladung × Bezugspreis</b>.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Zeitfilter auch im Reiter PV & Speicher (Amortisation, Prognosen und Live-Werte bleiben „seit Inbetriebnahme“)
+- Neuer Endpunkt `GET /api/storage_range?von=…&bis=…`
+
 ## 0.7.0
 
 - Zeitfilter für Übersicht und Lastverschiebung: Gesamt, Jahr, Monat, Tag und freier Zeitraum, mit Blättern

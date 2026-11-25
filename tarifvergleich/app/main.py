@@ -85,6 +85,7 @@ class Engine:
         self.profile: list[dict] = []
         self.summary: dict = {}
         self.storage: dict = {}
+        self.storage_rows: list[dict] = []
         self.storage_error: str | None = None
         self.last_error: str | None = None
         self.last_run: str | None = None
@@ -245,6 +246,7 @@ class Engine:
             pv_roof=[pos(roof_d, h) for h in hours] if roof_d is not None else None,
         )
         live = await self._battery_live()
+        self.storage_rows = res["rows"]
         daily = storage.aggregate(res["rows"], TZ, "day")
         self.storage = {
             "summary": storage.summary(res, o, TZ, live),
@@ -338,6 +340,16 @@ class Engine:
             "daily": sim.aggregate(rows, TZ, "hour" if gran == "hour" else "day"),
             "profile": sim.hour_profile(rows, TZ),
         }
+
+    def storage_range(self, von: dt.date, bis: dt.date) -> dict:
+        start = int(dt.datetime.combine(von, dt.time(0), TZ).timestamp())
+        end = int(dt.datetime.combine(bis + dt.timedelta(days=1), dt.time(0), TZ).timestamp())
+        rows = [r for r in self.storage_rows if start <= r["t"] < end]
+        days = (bis - von).days + 1
+        gran = "hour" if days <= 1 else ("day" if days <= 62 else "month")
+        summary = storage.range_totals(rows)
+        summary["gesamt"] = bool(rows) and len(rows) == len(self.storage_rows)
+        return {"summary": summary, "granularitaet": gran, "buckets": storage.aggregate(rows, TZ, gran)}
 
     @staticmethod
     def _totals(rows: list[dict]) -> dict:
@@ -579,7 +591,18 @@ def build_web(engine: Engine) -> web.Application:
             von, bis = bis, von
         return web.json_response(engine.range_view(von, bis), dumps=lambda o: json.dumps(o, default=str))
 
+    async def api_storage_range(req):
+        try:
+            von = dt.date.fromisoformat(req.query.get("von", ""))
+            bis = dt.date.fromisoformat(req.query.get("bis", ""))
+        except ValueError:
+            return web.json_response({"error": "von/bis=YYYY-MM-DD erwartet"}, status=400)
+        if bis < von:
+            von, bis = bis, von
+        return web.json_response(engine.storage_range(von, bis), dumps=lambda o: json.dumps(o, default=str))
+
     app.router.add_get("/api/range", api_range)
+    app.router.add_get("/api/storage_range", api_storage_range)
     app.router.add_post("/api/migrate", api_migrate)
     app.router.add_get("/", index)
     app.router.add_get("/api/data", api_data)

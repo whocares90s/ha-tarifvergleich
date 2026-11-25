@@ -139,11 +139,14 @@ SUM_KEYS = ("b_in", "b_out", "pvc", "gc", "avoided", "lost_feed", "grid_cost", "
             "s_pv_roof", "s_pv_other")
 
 
+KEY_FMT = {"hour": "%Y-%m-%d %H", "day": "%Y-%m-%d", "month": "%Y-%m"}
+
+
 def aggregate(rows, tz: ZoneInfo, key: str) -> list[dict]:
     out: dict[str, dict] = {}
+    fmt = KEY_FMT[key]
     for r in rows:
-        local = dt.datetime.fromtimestamp(r["t"], tz)
-        k = local.strftime("%Y-%m-%d") if key == "day" else local.strftime("%Y-%m")
+        k = dt.datetime.fromtimestamp(r["t"], tz).strftime(fmt)
         a = out.get(k)
         if a is None:
             a = out[k] = {"key": k, "s_dyn": 0.0, "dyn_hours": 0, "hours": 0, **{s: 0.0 for s in SUM_KEYS}}
@@ -154,6 +157,19 @@ def aggregate(rows, tz: ZoneInfo, key: str) -> list[dict]:
             a["dyn_hours"] += 1
         a["hours"] += 1
     return [out[k] for k in sorted(out)]
+
+
+def range_totals(rows) -> dict:
+    """Summen für einen Ausschnitt (Zeitfilter)."""
+    tot = {s: sum(r[s] for r in rows) for s in SUM_KEYS}
+    dyn_rows = [r for r in rows if r["s_dyn"] is not None]
+    tot.update(
+        stunden=len(rows),
+        ct_je_kwh=tot["s_fix"] / tot["b_out"] * 100.0 if tot["b_out"] else None,
+        dyn=sum(r["s_dyn"] for r in dyn_rows),
+        dyn_fix_vergleich=sum(r["s_fix"] for r in dyn_rows),
+    )
+    return tot
 
 
 def summary(res: dict, o: dict, tz: ZoneInfo, live: dict) -> dict:
