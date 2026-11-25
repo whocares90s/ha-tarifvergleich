@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Standard-Wirkungsgrad Akku 0,87 (Rundlauf inkl. Wechselrichter), Beschreibung ergänzt
+
 ## 0.9.0 – WattWert
 
 - Neuer Name **WattWert** (Kennung `tarifvergleich` und Entitäts-IDs bleiben unverändert)
