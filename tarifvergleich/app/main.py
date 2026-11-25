@@ -12,7 +12,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import config, prices, sim
+from . import config, prices, sim, storage
 from .ha import HAClient, HAError, ts_of
 
 _LOG = logging.getLogger("tarifvergleich")
@@ -27,6 +27,7 @@ STAT_IDS = {
     "dyn_all": ("tarifvergleich:kosten_dynamisch_optimiert", "Tarifvergleich Kosten dynamisch + Lastverschiebung"),
 }
 PRICE_STAT = ("tarifvergleich:preis_dynamisch", "Tarifvergleich Preis dynamisch")
+STORAGE_STAT = ("tarifvergleich:speicher_ersparnis", "Tarifvergleich Ersparnis Batteriespeicher")
 # aus v0.2.0, werden einmalig entfernt
 OBSOLETE_STATS = ["tarifvergleich:kosten_dynamisch_wp", "tarifvergleich:kosten_dynamisch_alle"]
 OBSOLETE_STATES = ["sensor.tarifvergleich_kosten_dynamisch_wp", "sensor.tarifvergleich_ersparnis_wp",
@@ -83,6 +84,8 @@ class Engine:
         self.monthly: list[dict] = []
         self.profile: list[dict] = []
         self.summary: dict = {}
+        self.storage: dict = {}
+        self.storage_error: str | None = None
         self.last_error: str | None = None
         self.last_run: str | None = None
         self.busy = asyncio.Lock()
@@ -105,7 +108,10 @@ class Engine:
         now = dt.datetime.now(dt.timezone.utc)
         end = now.replace(minute=0, second=0, microsecond=0)  # nur abgeschlossene Stunden
 
-        await prices.refresh(self.store, self.session, start_date)
+        price_start = start_date
+        if self._storage_enabled():
+            price_start = min(start_date, dt.date.fromisoformat(o["speicher_bestand_start"]))
+        await prices.refresh(self.store, self.session, price_start)
 
         ev_ids = [s for s in (o.get("ev_statistiken") or []) if s] if o.get("e_auto_vorhanden") else []
         wp_id = (o.get("wp_statistik") or "") if o.get("waermepumpe_vorhanden") else ""
@@ -160,6 +166,132 @@ class Engine:
         await self._cleanup_obsolete()
         await self._publish_states()
         await self._import_statistics(rows)
+
+        try:
+            await self._run_storage(end)
+            self.storage_error = None
+        except Exception as err:  # noqa: BLE001 – Speicher-Auswertung darf den Rest nicht stören
+            self.storage_error = f"{type(err).__name__}: {err}"
+            _LOG.exception("Speicher-Auswertung fehlgeschlagen")
+
+    # ------------------------------------------------------------------ Speicher
+    def _storage_enabled(self) -> bool:
+        o = self.opts
+        return bool(o.get("hausakku_vorhanden") and o.get("akku_statistik_laden")
+                    and o.get("akku_statistik_entladen") and o.get("speicher_bestand_start"))
+
+    async def _battery_live(self) -> dict:
+        out = {}
+        for key, opt in (("bestand", "akku_leistung_bestand"), ("erweiterung", "akku_leistung_erweiterung")):
+            eid = self.opts.get(opt) or ""
+            if not eid.endswith("_power"):
+                continue
+            base = eid[: -len("_power")]
+            vals = {}
+            for name, suffix in (("soh", "_state_of_health"), ("zyklen", "_cycle_count"), ("soc", "_state_of_charge")):
+                st = await self.ha.get_state(base + suffix)
+                try:
+                    vals[name] = float(st) if st not in (None, "unknown", "unavailable") else None
+                except ValueError:
+                    vals[name] = None
+            out[key] = vals
+        return out
+
+    async def _run_storage(self, end: dt.datetime) -> None:
+        o = self.opts
+        if not self._storage_enabled():
+            self.storage = {}
+            return
+        start = dt.datetime.combine(dt.date.fromisoformat(o["speicher_bestand_start"]), dt.time(0), TZ)
+        pv_ids = [s for s in (o.get("pv_statistiken") or []) if s]
+        ids = [o["akku_statistik_laden"], o["akku_statistik_entladen"], o["statistik_netzbezug"],
+               o["statistik_einspeisung"], *pv_ids]
+        stats = await self.ha.statistics(ids, start, end, ["change"], {"energy": "kWh"})
+        p_ids = [x for x in (o.get("akku_leistung_bestand"), o.get("akku_leistung_erweiterung")) if x]
+        p_stats = await self.ha.statistics(p_ids, start, end, ["mean"], {"power": "W"}) if p_ids else {}
+
+        in_d = _series(stats, o["akku_statistik_laden"], "change")
+        if not in_d:
+            raise HAError(f"Keine Statistik für {o['akku_statistik_laden']} gefunden")
+        out_d = _series(stats, o["akku_statistik_entladen"], "change")
+        imp_d = _series(stats, o["statistik_netzbezug"], "change")
+        exp_d = _series(stats, o["statistik_einspeisung"], "change")
+        pv_ds = [_series(stats, sid, "change") for sid in pv_ids]
+        w_old_d = _series(p_stats, o.get("akku_leistung_bestand") or "", "mean")
+        w_ext_d = _series(p_stats, o.get("akku_leistung_erweiterung") or "", "mean")
+
+        first = max(int(start.timestamp()), min(in_d))
+        hours = list(range(first, int(end.timestamp()), 3600))
+        spot_d = self.store.get(first, int(end.timestamp()))
+        pos = lambda d, h: max(0.0, d.get(h, 0.0))  # noqa: E731
+        opt_pos = lambda d, h: max(0.0, d[h]) if h in d else None  # noqa: E731
+        absw = lambda d, h: abs(d[h]) if h in d else None  # noqa: E731
+
+        res = storage.analyze(
+            hours,
+            [pos(in_d, h) for h in hours],
+            [pos(out_d, h) for h in hours],
+            [sum(pos(d, h) for d in pv_ds) for h in hours],
+            [opt_pos(imp_d, h) for h in hours],
+            [opt_pos(exp_d, h) for h in hours],
+            [spot_d.get(h) for h in hours],
+            [absw(w_old_d, h) for h in hours],
+            [absw(w_ext_d, h) for h in hours],
+            o, TZ,
+        )
+        live = await self._battery_live()
+        daily = storage.aggregate(res["rows"], TZ, "day")
+        self.storage = {
+            "summary": storage.summary(res, o, TZ, live),
+            "monthly": storage.aggregate(res["rows"], TZ, "month"),
+            "daily": [{"key": d["key"], "s_old": d["s_old"], "s_ext": d["s_ext"], "marg": d["marg"],
+                       "s_fix": d["s_fix"]} for d in daily],
+        }
+        s = self.storage["summary"]
+        _LOG.info("Speicher: %.0f kWh entladen, Ersparnis %.2f € (Bestand %.2f €, Erweiterung anteilig %.2f €, "
+                  "Zusatznutzen %.2f €)", s["b_out"], s["s_fix"], s["s_old"], s["s_ext"],
+                  s["erweiterung"]["zusatznutzen"].get("seit_inbetriebnahme_eur", 0.0))
+        await self._publish_storage()
+        await self._import_storage_statistics(res["rows"])
+
+    async def _publish_storage(self) -> None:
+        s = self.storage["summary"]
+        b, e = s["bestand"], s["erweiterung"]
+        z = e["zusatznutzen"]
+        attrs = {
+            "friendly_name": "Tarifvergleich Ersparnis Batteriespeicher",
+            "unit_of_measurement": "EUR", "device_class": "monetary", "icon": "mdi:home-battery",
+            "seit": s["von"], "entladen_kwh": round(s["b_out"], 1), "ct_je_kwh": _r(s["ct_je_kwh"]),
+            "letzte_12_monate": round(s["letzte_12_monate"], 2),
+            "bestand_eur": round(s["s_old"], 2),
+            "erweiterung_anteilig_eur": round(s["s_ext"], 2),
+            "erweiterung_zusatznutzen_eur": _r(z.get("seit_inbetriebnahme_eur")),
+            "erweiterung_zusatznutzen_pro_jahr_eur": _r(z.get("pro_jahr_eur")),
+        }
+        if b.get("amortisation"):
+            attrs["bestand_amortisiert_prozent"] = round(b["amortisation"]["prozent"], 1)
+        if e.get("amortisation"):
+            attrs["erweiterung_amortisiert_prozent"] = round(e["amortisation"]["prozent"], 1)
+        await self.ha.set_state("sensor.tarifvergleich_speicher_ersparnis", round(s["s_fix"], 2), attrs)
+
+    async def _import_storage_statistics(self, rows: list[dict]) -> None:
+        if not rows:
+            return
+        sig = self._signature()
+        state = _read_state()
+        full = state.get("speicher_sig") != sig or state.get("speicher_first_t") != rows[0]["t"]
+        cutoff = rows[-1]["t"] - 72 * 3600 if not full else -1
+        cum, stats = 0.0, []
+        for r in rows:
+            cum += r["s_fix"]
+            if r["t"] >= cutoff:
+                stats.append({"start": _iso(r["t"]), "sum": round(cum, 4), "state": round(cum, 4)})
+        meta = {"has_mean": False, "mean_type": 0, "has_sum": True, "name": STORAGE_STAT[1],
+                "source": "tarifvergleich", "statistic_id": STORAGE_STAT[0], "unit_of_measurement": "EUR",
+                "unit_class": None}
+        await self.ha.import_statistics(meta, stats)
+        state.update(speicher_sig=sig, speicher_first_t=rows[0]["t"])
+        _write_state(state)
 
     def _summary(self, res: dict, has_pv: bool) -> dict:
         rows = res["rows"]
@@ -331,8 +463,9 @@ def build_web(engine: Engine) -> web.Application:
                 "future": engine.future_prices(),
                 "tarif": sim.breakdown(engine.opts),
                 "optionen": {k: engine.opts.get(k) for k in OPTION_KEYS},
+                "speicher": engine.storage,
                 "status": {"letzter_lauf": engine.last_run, "fehler": engine.last_error,
-                           "laeuft": engine.busy.locked()},
+                           "speicher_fehler": engine.storage_error, "laeuft": engine.busy.locked()},
             },
             dumps=lambda o: json.dumps(o, default=str),
         )

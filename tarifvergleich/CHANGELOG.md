@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Neuer Reiter **Speicher**: Ersparnis des Batteriespeichers seit Inbetriebnahme gegenüber PV ohne Speicher
+  (Entladung × Bezugspreis − PV-Ladung × Einspeisevergütung − Netzladung × Bezugspreis), mit Bezugspreis-Historie
+- Aufteilung Bestandsakku/Erweiterung: anteilig nach gemessener Leistung bzw. Kapazität, dazu der simulierte
+  **Zusatznutzen** der Erweiterung (Bestand allein vs. beide) inkl. Hochrechnung pro Jahr und Modellgüte
+- Amortisation je Speicher (optionale Anschaffungskosten), Live-Werte SoH/Zyklen/Ladestand
+- Bewertung zusätzlich mit dynamischem Tarif; Börsenpreise werden dafür ab Speicher-Inbetriebnahme geladen
+- Neuer Sensor `sensor.tarifvergleich_speicher_ersparnis`, Langzeitstatistik `tarifvergleich:speicher_ersparnis`
+
 ## 0.3.2
 
 - „Tibber-Aufschlag“ heißt jetzt „Strombeschaffungskosten“; Standard 1,807 ct netto (= 2,15 ct brutto laut Tibber)

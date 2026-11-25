@@ -99,5 +99,35 @@ configuration:
   akku_mindest_spread_ct:
     name: Akku Mindest-Preisabstand (ct/kWh)
     description: Netzladung nur, wenn späterer Preis × Wirkungsgrad mindestens so viel teurer ist (deckt Verschleiß ab).
+  akku_statistik_laden:
+    name: Speicher – Statistik Ladung (kWh)
+    description: Zählerstand der in den Akku geladenen Energie, z. B. vom Wechselrichter.
+  akku_statistik_entladen:
+    name: Speicher – Statistik Entladung (kWh)
+  bezugspreis_historie:
+    name: Speicher – Bezugspreis-Historie
+    description: Je Zeile „Datum=ct brutto“ ab wann welcher Arbeitspreis galt, z. B. 2025-01-01=26.19
+  speicher_bestand_kwh:
+    name: Bestandsakku – Kapazität (kWh)
+  speicher_bestand_start:
+    name: Bestandsakku – in Betrieb seit (YYYY-MM-DD)
+  speicher_bestand_kosten_eur:
+    name: Bestandsakku – Anschaffungskosten (€, optional)
+  akku_leistung_bestand:
+    name: Bestandsakku – Statistik Leistung (W, optional)
+    description: Für die Aufteilung zwischen den Akkus und Live-Werte (SoH, Zyklen).
+  speicher_erweiterung_kwh:
+    name: Erweiterung – Kapazität (kWh, 0 = keine)
+  speicher_erweiterung_start:
+    name: Erweiterung – in Betrieb seit (YYYY-MM-DD)
+  speicher_erweiterung_kosten_eur:
+    name: Erweiterung – Anschaffungskosten (€, optional)
+  akku_leistung_erweiterung:
+    name: Erweiterung – Statistik Leistung (W, optional)
+  speicher_nutzbar_prozent:
+    name: Speicher – nutzbarer Anteil der Kapazität (%)
+    description: Für die Simulation des Zusatznutzens, z. B. 80 bei 20 % Mindest-Ladestand.
+  wechselrichter_max_kw:
+    name: Speicher – max. Lade-/Entladeleistung Wechselrichter (kW)
   log_level:
     name: Log-Level

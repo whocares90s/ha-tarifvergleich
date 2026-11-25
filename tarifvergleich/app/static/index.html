@@ -78,6 +78,7 @@
   <nav role="tablist">
     <button role="tab" data-view="overview" aria-selected="true">Übersicht</button>
     <button role="tab" data-view="shift" aria-selected="false" id="tabShift" hidden>Lastverschiebung</button>
+    <button role="tab" data-view="storage" aria-selected="false" id="tabStorage" hidden>Speicher</button>
   </nav>
 
   <div id="error" class="card err" hidden></div>
@@ -146,6 +147,36 @@
 
     <section class="grid three" id="measureCards"></section>
   </div>
+
+  <!-- ===================================================== Speicher -->
+  <div class="view" id="view-storage" hidden>
+    <p class="intro" id="stIntro"></p>
+    <div id="stError" class="card err" hidden></div>
+    <div class="grid kpis" id="stKpis"></div>
+
+    <section class="grid two">
+      <div class="card"><h2>Ersparnis je Monat</h2><div class="chart"><canvas id="cStMonthly"></canvas></div></div>
+      <div class="card"><h2>Energieflüsse des Speichers je Monat</h2><div class="chart"><canvas id="cStFlows"></canvas></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Amortisation</h2>
+      <div class="chart"><canvas id="cStAmort"></canvas></div>
+      <div class="note" id="stAmortNote"></div>
+    </section>
+
+    <section class="grid three" id="stCards"></section>
+
+    <section class="card">
+      <h2>Monatsübersicht Speicher</h2>
+      <div class="scroll"><table id="tStorage"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Rechenweg</h2>
+      <div class="note" style="margin-top:0" id="stMethod"></div>
+    </section>
+  </div>
 </main>
 
 <script>
@@ -190,8 +221,19 @@ function kpi(label, value, sub, cls, color) {
 }
 
 // ------------------------------------------------------------------ Tabs
+const hasStorage = d => !!(d && d.speicher && d.speicher.summary && d.speicher.summary.tage);
+
 function showView(v) {
   if (v === "shift" && DATA && !present(DATA).length) v = "overview";
+  if (v === "storage" && DATA && !hasStorage(DATA)) v = "overview";
+  if (v === "storage") {
+    VIEW = v;
+    try { localStorage.setItem("tv-view", v); } catch (e) {}
+    document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
+    document.querySelectorAll(".view").forEach(el => el.hidden = el.id !== "view-" + v);
+    if (DATA) renderStorage(DATA);
+    return;
+  }
   VIEW = v;
   try { localStorage.setItem("tv-view", v); } catch (e) {}
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
@@ -211,6 +253,7 @@ function render(d) {
     `${new Date(s.von).toLocaleDateString("de-DE")} – ${new Date(s.bis).toLocaleDateString("de-DE")} · ${num(s.stunden / 24, 0)} Tage` +
     (s.stunden_ohne_preis ? ` · ${s.stunden_ohne_preis} h ohne Preis` : "");
   document.getElementById("tabShift").hidden = !present(d).length;
+  document.getElementById("tabStorage").hidden = !hasStorage(d);
   const D = d.daily;
   document.querySelectorAll("input.day").forEach(el => {
     if (!el.value && D.length) { el.min = D[0].key; el.max = D[D.length - 1].key; el.value = D[D.length - 1].key; }
@@ -342,6 +385,101 @@ function renderShift(d) {
       PV-Ladung wird also nicht verdrängt. An PV-armen Tagen ist der Akku meist leer, deshalb passiert die Netzladung vor allem dort.
       Entladen wird innerhalb von 24 h in teureren Stunden, wenn Preis × Wirkungsgrad den Ladepreis um den Mindestabstand übersteigt.</div></div>`);
   document.getElementById("measureCards").innerHTML = cards.join("");
+}
+
+// ------------------------------------------------------------------ Speicher
+const dateDE = s => s ? new Date(s.length === 10 ? s + "T12:00:00" : s).toLocaleDateString("de-DE") : "–";
+const years = v => v == null ? "–" : v.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " Jahre";
+
+function renderStorage(d) {
+  const S = d.speicher.summary, M = d.speicher.monthly, D = d.speicher.daily;
+  const B = S.bestand, E = S.erweiterung, Z = E.zusatznutzen || {};
+  const hasExt = !!E.start && E.kwh > 0;
+  const err = document.getElementById("stError");
+  err.hidden = !d.status.speicher_fehler; err.textContent = d.status.speicher_fehler ? "Fehler in der Speicher-Auswertung: " + d.status.speicher_fehler : "";
+  document.getElementById("stIntro").textContent =
+    `Was hat der Speicher seit ${dateDE(S.von)} eingespart? Bewertet mit eurem jeweiligen Bezugspreis und ${ct(S.einspeiseverguetung_ct)} Einspeisevergütung – ` +
+    `also gegenüber einer PV-Anlage ohne Speicher.`;
+
+  const amortSub = a => a ? `${num(a.prozent, 0)} % von ${eur(a.kosten)} amortisiert` : "";
+  document.getElementById("stKpis").innerHTML =
+    kpi("Ersparnis gesamt", eur(S.s_fix), `${kwh(S.b_out)} entladen · Ø ${ct(S.ct_je_kwh)} je kWh`, sign(S.s_fix), "--bat") +
+    kpi("Letzte 12 Monate", eur(S.letzte_12_monate), "") +
+    kpi(`Bestandsakku ${num(B.kwh)} kWh`, eur(S.s_old), amortSub(B.amortisation), sign(S.s_old), "--dyn") +
+    (hasExt ? kpi(`Erweiterung ${num(E.kwh)} kWh – anteilig`, eur(E.anteilig), `seit ${dateDE(E.start)} · nach Durchsatz`, sign(E.anteilig), "--ev") +
+      kpi("Erweiterung – Zusatznutzen", eur(Z.seit_inbetriebnahme_eur), `hochgerechnet ${eur(Z.pro_jahr_eur)}/Jahr · ${amortSub(E.amortisation)}`, sign(Z.seit_inbetriebnahme_eur || 0), "--ev") : "") +
+    kpi("Mit dynamischem Tarif bewertet", eur(S.dyn), `statt ${eur(S.dyn_fix_vergleich)} zum Festpreis (seit ${dateDE(S.dyn_von)})`);
+
+  chart("cStMonthly", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+    { label: "Bestandsakku", data: M.map(m => m.s_old), backgroundColor: css("--dyn"), stack: "s" },
+    ...(hasExt ? [{ label: "Erweiterung (anteilig)", data: M.map(m => m.s_ext), backgroundColor: css("--ev"), stack: "s" },
+      { type: "line", label: "Zusatznutzen Erweiterung", data: M.map(m => m.marg || null), borderColor: css("--price"), pointRadius: 3, borderWidth: 2 }] : []) ] },
+    options: { scales: { x: { stacked: true }, y: Object.assign({ stacked: true }, eurAxis()) }, plugins: eurTip } });
+
+  chart("cStFlows", { type: "bar", data: { labels: M.map(m => monthName(m.key)), datasets: [
+    { label: "Ladung aus PV", data: M.map(m => m.pvc), backgroundColor: css("--good"), stack: "in" },
+    { label: "Ladung aus Netz", data: M.map(m => m.gc), backgroundColor: css("--bad"), stack: "in" },
+    { label: "Entladung", data: M.map(m => m.b_out), backgroundColor: css("--bat"), stack: "out" } ] },
+    options: { scales: { x: {}, y: kwhAxis() } } });
+
+  let co = 0, ce = 0, cm = 0;
+  const amort = [
+    { label: "Bestandsakku kumuliert", data: D.map(x => (co += x.s_old)), borderColor: css("--dyn"), pointRadius: 0, borderWidth: 2 }];
+  if (hasExt) amort.push(
+    { label: "Erweiterung anteilig kumuliert", data: D.map(x => (x.key >= E.start ? (ce += x.s_ext) : null)), borderColor: css("--ev"), pointRadius: 0, borderWidth: 2 },
+    { label: "Erweiterung Zusatznutzen kumuliert", data: D.map(x => (x.key >= E.start ? (cm += x.marg) : null)), borderColor: css("--price"), pointRadius: 0, borderWidth: 2 });
+  if (B.amortisation) amort.push({ label: "Kosten Bestand", data: D.map(() => B.amortisation.kosten), borderColor: css("--dyn"), borderDash: [6, 4], pointRadius: 0, borderWidth: 1 });
+  if (hasExt && E.amortisation) amort.push({ label: "Kosten Erweiterung", data: D.map(() => E.amortisation.kosten), borderColor: css("--ev"), borderDash: [6, 4], pointRadius: 0, borderWidth: 1 });
+  chart("cStAmort", { type: "line", data: { labels: D.map(x => dateDE(x.key)), datasets: amort },
+    options: { scales: { x: { ticks: { maxTicksLimit: 12 } }, y: eurAxis() }, plugins: eurTip } });
+  const pb = (name, a, basis) => a ? `${name}: ${eur(a.erspart)} von ${eur(a.kosten)} (${num(a.prozent, 0)} %) – ` +
+    (a.rest_eur <= 0 ? "bereits amortisiert." : `noch ${eur(a.rest_eur)}, bei ${basis} etwa ${years(a.rest_jahre)} (gesamt ${years(a.gesamt_jahre)}).`) : "";
+  document.getElementById("stAmortNote").innerHTML = [
+    pb("Bestandsakku", B.amortisation, `${eur(B.pro_jahr)}/Jahr (letzte 12 Monate)`),
+    hasExt ? pb("Erweiterung", E.amortisation, `${eur(Z.pro_jahr_eur)}/Jahr Zusatznutzen (hochgerechnet)`) : ""].filter(Boolean).join("<br>");
+
+  const live = x => (x.soh != null || x.zyklen != null) ? `<dt>Gesundheit (SoH)</dt><dd>${num(x.soh, 0)} %</dd><dt>Zyklen</dt><dd>${num(x.zyklen, 0)}</dd><dt>Ladestand jetzt</dt><dd>${num(x.soc, 0)} %</dd>` : "";
+  const cards = [`<div class="card"><h3>Bestandsakku ${num(B.kwh)} kWh</h3><dl>
+    <dt>In Betrieb seit</dt><dd>${dateDE(B.start)}</dd>
+    <dt>Ersparnis</dt><dd>${eur(S.s_old)}</dd>
+    <dt>Ersparnis pro Jahr (letzte 12 Monate)</dt><dd>${eur(B.pro_jahr)}</dd>
+    ${B.amortisation ? `<dt>Anschaffung</dt><dd>${eur(B.amortisation.kosten)}</dd>` : ""}${live(B)}</dl></div>`];
+  if (hasExt) cards.push(`<div class="card"><h3>Erweiterung ${num(E.kwh)} kWh</h3><dl>
+    <dt>In Betrieb seit</dt><dd>${dateDE(E.start)}</dd>
+    <dt>Ersparnis anteilig (nach Durchsatz)</dt><dd>${eur(E.anteilig)}</dd>
+    <dt><b>Zusatznutzen</b> (ggü. Bestand allein)</dt><dd><b>${eur(Z.seit_inbetriebnahme_eur)}</b></dd>
+    <dt>Zusatznutzen hochgerechnet</dt><dd>${eur(Z.pro_jahr_eur)}/Jahr</dd>
+    ${E.amortisation ? `<dt>Anschaffung</dt><dd>${eur(E.amortisation.kosten)}</dd>` : ""}${live(E)}</dl>
+    <div class="note"><b>Anteilig</b> verteilt die Ersparnis nach dem, was durch die Erweiterung geflossen ist.
+      <b>Zusatznutzen</b> fragt: Was hätte der Bestandsakku allein <i>nicht</i> geschafft? Das ist der ehrlichere Wert für die Amortisation,
+      weil der Bestandsakku vieles auch allein abgedeckt hätte. Die Hochrechnung simuliert beide Varianten über alle Monate mit Netzdaten
+      (${num(Z.zeitraum_tage, 0)} Tage) und rechnet auf ein Jahr hoch.</div></div>`);
+  if (Z.verfuegbar) cards.push(`<div class="card"><h3>Modellgüte</h3><dl>
+    <dt>Simulation (realer Ausbau)</dt><dd>${eur(Z.modell_simuliert_eur)}</dd>
+    <dt>Gemessen (ohne Netzladung)</dt><dd>${eur(Z.modell_gemessen_eur)}</dd>
+    <dt>Abweichung</dt><dd>${pct(Z.modell_simuliert_eur - Z.modell_gemessen_eur, Z.modell_gemessen_eur)}</dd>
+    <dt>Nutzbar Bestand / gesamt</dt><dd>${num(Z.nutzbar_bestand_kwh)} / ${num(Z.nutzbar_gesamt_kwh)} kWh</dd>
+    <dt>Wirkungsgrad (gemessen)</dt><dd>${num(S.eta * 100, 1)} %</dd></dl>
+    <div class="note">Damit der Zusatznutzen glaubwürdig ist, muss die Simulation mit dem tatsächlichen Ausbau die gemessene Ersparnis treffen.
+      Kleine Abweichungen kommen aus der Stundenauflösung und der vereinfachten Lade-/Entladelogik.</div></div>`);
+  document.getElementById("stCards").innerHTML = cards.join("");
+
+  document.getElementById("tStorage").innerHTML =
+    `<tr><th>Monat</th><th>Ladung PV</th><th>Ladung Netz</th><th>Entladung</th><th>vermiedener Bezug</th><th>entgangene Einspeisung</th><th>Netzladekosten</th><th>Ersparnis</th>${hasExt ? "<th>davon Erweiterung</th><th>Zusatznutzen</th>" : ""}<th>dyn. bewertet</th></tr>` +
+    M.map(m => `<tr><td>${monthName(m.key)}</td><td>${kwh(m.pvc)}</td><td>${kwh(m.gc)}</td><td>${kwh(m.b_out)}</td>
+      <td>${eur(m.avoided)}</td><td>${eur(-m.lost_feed)}</td><td>${eur(-m.grid_cost)}</td><td class="${sign(m.s_fix)}"><b>${eur(m.s_fix)}</b></td>
+      ${hasExt ? `<td>${m.s_ext ? eur(m.s_ext) : "–"}</td><td>${m.marg ? eur(m.marg) : "–"}</td>` : ""}
+      <td>${m.dyn_hours ? eur(m.s_dyn) : "–"}</td></tr>`).join("") +
+    `<tr><th>Summe</th><th>${kwh(S.pvc)}</th><th>${kwh(S.gc)}</th><th>${kwh(S.b_out)}</th><th>${eur(S.avoided)}</th><th>${eur(-S.lost_feed)}</th><th>${eur(-S.grid_cost)}</th><th>${eur(S.s_fix)}</th>
+      ${hasExt ? `<th>${eur(S.s_ext)}</th><th>${eur(Z.seit_inbetriebnahme_eur)}</th>` : ""}<th>${eur(S.dyn)}</th></tr>`;
+
+  document.getElementById("stMethod").innerHTML = `
+    Für jede Stunde: <b>Ersparnis = Entladung × Bezugspreis − PV-Ladung × Einspeisevergütung − Netzladung × Bezugspreis</b>.
+    Ohne Speicher hättet ihr den entladenen Strom kaufen müssen und den geladenen PV-Strom eingespeist. Lade-/Entladeverluste stecken darin, weil mehr geladen als entladen wird.<br>
+    Bezugspreise: ${S.preise.map(p => `${p.ab ? "ab " + dateDE(p.ab) : ""} ${ct(p.ct)}`).join(" · ")}. Einspeisevergütung ${ct(S.einspeiseverguetung_ct)}.<br>
+    Netzladung: mit Netzdaten der Anteil der Ladung, der in Stunden mit Netzbezug lag; vor Beginn der Netzdaten geschätzt als Ladung über der PV-Erzeugung.<br>
+    Aufteilung auf die Speicher: vor ${dateDE(E.start)} alles Bestandsakku, danach nach gemessener Leistung je Akku, wo nicht vorhanden nach Kapazität.<br>
+    Die dynamische Bewertung setzt statt des Festpreises den stündlichen Tibber-Preis an. Stundenauflösung; Wechselrichterverluste sind nicht abgezogen (Messung akkuseitig).`;
 }
 
 // ------------------------------------------------------------------ Tagesdetail

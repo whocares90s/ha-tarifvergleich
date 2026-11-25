@@ -135,6 +135,19 @@ class HAClient:
         await self.call({"type": "recorder/clear_statistics", "statistic_ids": statistic_ids})
 
     # ------------------------------------------------------------------ REST
+    async def get_state(self, entity_id: str) -> str | None:
+        try:
+            async with self._session.get(
+                f"{API_URL}/states/{entity_id}",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return (await resp.json()).get("state")
+        except (aiohttp.ClientError, ValueError):
+            return None
+
     async def delete_state(self, entity_id: str) -> None:
         try:
             async with self._session.delete(

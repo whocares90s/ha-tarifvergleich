@@ -34,6 +34,23 @@ Maßnahme wird einzeln gegen „dynamisch wie gemessen“ gerechnet:
 Gerechnet wird mit den bekannten Day-Ahead-Preisen (perfekte Voraussicht innerhalb des Fensters) –
 das ist eine **Obergrenze** dessen, was evcc o. ä. erreicht.
 
+## Speicher
+
+Der Reiter **Speicher** (sichtbar mit `hausakku_vorhanden` und den Lade-/Entlade-Statistiken) rechnet
+stündlich seit Inbetriebnahme:
+
+```
+Ersparnis = Entladung × Bezugspreis − PV-Ladung × Einspeisevergütung − Netzladung × Bezugspreis
+```
+
+- Bezugspreis aus `bezugspreis_historie` (je Zeile `Datum=ct brutto`).
+- Netzladung: mit Netzdaten = Ladung in Stunden mit Netzbezug; davor geschätzt als Ladung über PV-Erzeugung.
+- Zwei Speicher: vor dem Datum der Erweiterung zählt alles zum Bestand; danach anteilig nach gemessener
+  Leistung je Akku (sonst Kapazität). Zusätzlich der **Zusatznutzen** der Erweiterung: Simulation
+  „Bestand allein“ gegen „beide“ auf denselben PV-Überschüssen und demselben Bedarf. Die Modellgüte
+  (Simulation mit realem Ausbau vs. gemessen) wird mit angezeigt.
+- Amortisation je Speicher, wenn Anschaffungskosten eingetragen sind.
+
 ## Ergebnisse in Home Assistant
 
 Sensoren (werden stündlich gesetzt):

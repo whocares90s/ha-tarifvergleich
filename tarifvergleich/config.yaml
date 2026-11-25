@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.3.2"
+version: "0.4.0"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -62,6 +62,21 @@ options:
   akku_max_netzladeleistung_kw: 6.0
   akku_wirkungsgrad: 0.9
   akku_mindest_spread_ct: 3.0
+  akku_statistik_laden: sensor.deye_sunsynk_sol_ark_3_phase_battery_energy_in
+  akku_statistik_entladen: sensor.deye_sunsynk_sol_ark_3_phase_battery_energy_out
+  bezugspreis_historie:
+    - "2025-01-01=26.19"
+    - "2026-10-27=29.17"
+  speicher_bestand_kwh: 15.0
+  speicher_bestand_start: "2025-01-01"
+  speicher_bestand_kosten_eur: 2088
+  akku_leistung_bestand: sensor.felicity_solar_battery_100011002424390412_power
+  speicher_erweiterung_kwh: 14.3
+  speicher_erweiterung_start: "2026-08-14"
+  speicher_erweiterung_kosten_eur: 1579
+  akku_leistung_erweiterung: sensor.felicity_solar_battery_074504828026090487_power
+  speicher_nutzbar_prozent: 80
+  wechselrichter_max_kw: 12.0
   log_level: info
 schema:
   startdatum: match(^\d{4}-\d{2}-\d{2}$)
@@ -108,4 +123,18 @@ schema:
   akku_max_netzladeleistung_kw: float
   akku_wirkungsgrad: float(0.5,1)
   akku_mindest_spread_ct: float
+  akku_statistik_laden: str?
+  akku_statistik_entladen: str?
+  bezugspreis_historie:
+    - match(^\d{4}-\d{2}-\d{2}=\d+([.,]\d+)?$)
+  speicher_bestand_kwh: float
+  speicher_bestand_start: match(^\d{4}-\d{2}-\d{2}$)
+  speicher_bestand_kosten_eur: float?
+  akku_leistung_bestand: str?
+  speicher_erweiterung_kwh: float
+  speicher_erweiterung_start: str?
+  speicher_erweiterung_kosten_eur: float?
+  akku_leistung_erweiterung: str?
+  speicher_nutzbar_prozent: float(10,100)
+  wechselrichter_max_kw: float
   log_level: list(debug|info|warning|error)
