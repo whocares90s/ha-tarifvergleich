@@ -276,7 +276,7 @@ function render(d) {
 function renderOverview(d) {
   const s = d.summary, t = d.tarif, M = d.monthly, D = d.daily, has = present(d).length > 0;
   document.getElementById("kpis").innerHTML =
-    kpi("Festpreis", eur(s.fix), `${ct(t.fix_ct_brutto)}/kWh · ${kwh(s.imp)}`, "", "--fix") +
+    kpi("Festpreis", eur(s.fix), `${t.preis_historie && t.preis_historie.length > 1 ? "nach Tarifhistorie" : ct(t.fix_ct_brutto) + "/kWh"} · ${kwh(s.imp)}`, "", "--fix") +
     kpi("Dynamisch", eur(s.dyn), `Ø ${ct(s.preis_gewichtet_ct)}/kWh`, "", "--dyn") +
     kpi("Ersparnis dynamisch", eur(s.ersparnis), pct(s.ersparnis, s.fix), sign(s.ersparnis)) +
     (has ? kpi("Mit Lastverschiebung", eur(s.ersparnis_alle), `ggü. Festpreis · Details im Reiter „Lastverschiebung“`, sign(s.ersparnis_alle), "--all") : "") +

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Eine Datenquelle: alle Auswertungen basieren auf dem eBZ (Optionen `speicher_statistik_*` entfernt)
+- Tarifvergleich ab Inbetriebnahme (Standard-Startdatum 2025-01-23)
+- Festpreis im Tarifvergleich nach `bezugspreis_historie` (vorher immer aktueller Festpreis)
+- `POST /api/migrate?src=…&dst=…&dry=1` – einmalige Übernahme von Stundenwerten in eine Zählerstatistik
+
 ## 0.5.1
 
 - PV & Speicher nutzt eigene Netzzähler (Standard: Deye), weil die eBZ-Daten vor Feb. 2026 nur als Tageswerte importiert sind

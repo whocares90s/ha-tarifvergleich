@@ -104,14 +104,9 @@ configuration:
     description: Zählerstand der in den Akku geladenen Energie, z. B. vom Wechselrichter.
   akku_statistik_entladen:
     name: Speicher – Statistik Entladung (kWh)
-  speicher_statistik_netzbezug:
-    name: PV & Speicher – Statistik Netzbezug (kWh, optional)
-    description: Netzzähler mit echten Stundenwerten seit Inbetriebnahme (z. B. vom Wechselrichter). Leer = Statistik Netzbezug.
-  speicher_statistik_einspeisung:
-    name: PV & Speicher – Statistik Einspeisung (kWh, optional)
   bezugspreis_historie:
-    name: Speicher – Bezugspreis-Historie
-    description: Je Zeile „Datum=ct brutto“ ab wann welcher Arbeitspreis galt, z. B. 2025-01-01=26.19
+    name: Bezugspreis-Historie (Festpreis)
+    description: Je Zeile „Datum=ct brutto“ ab wann welcher Arbeitspreis galt, z. B. 2025-01-01=26.19. Gilt für den Tarifvergleich und PV & Speicher; leer = aktueller Festpreis.
   speicher_bestand_kwh:
     name: Bestandsakku – Kapazität (kWh)
   speicher_bestand_start:

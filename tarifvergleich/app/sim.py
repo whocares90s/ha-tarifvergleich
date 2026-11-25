@@ -40,6 +40,30 @@ def dyn_price_ct(spot_eur_mwh: float, o: dict) -> float:
     return (spot_eur_mwh / 10.0 + dyn_surcharges_ct_netto(o)) * vat(o)
 
 
+def parse_price_history(entries, fallback_ct: float, tz: ZoneInfo) -> list[tuple[int, float]]:
+    """['2025-01-01=26.19', '2026-10-27=29.17'] -> [(unix_start, ct), ...] sortiert."""
+    out = []
+    for e in entries or []:
+        try:
+            d, v = str(e).split("=", 1)
+            start = dt.datetime.combine(dt.date.fromisoformat(d.strip()), dt.time(0), tz)
+            out.append((int(start.timestamp()), float(v.strip().replace(",", "."))))
+        except ValueError:
+            continue
+    out.sort()
+    return out or [(0, float(fallback_ct))]
+
+
+def price_at(hist: list[tuple[int, float]], ts: int) -> float:
+    p = hist[0][1]
+    for start, ct in hist:
+        if ts >= start:
+            p = ct
+        else:
+            break
+    return p
+
+
 def dyn_fixed_eur_year(o: dict) -> float:
     return (
         o["dyn_grundgebuehr_eur_monat_brutto"] * 12.0
@@ -67,6 +91,7 @@ def breakdown(o: dict) -> dict:
         },
         "aufschlaege_ct_brutto_summe": dyn_surcharges_ct_netto(o) * v,
         "fix_ct_brutto": o["festpreis_arbeitspreis_ct_brutto"],
+        "preis_historie": list(o.get("bezugspreis_historie") or []),
         "fix_grundpreis_eur_jahr": fix_fixed_eur_year(o),
         "dyn_grundpreis_eur_jahr": dyn_fixed_eur_year(o),
         "dyn_grundpreis_teile": {
@@ -362,7 +387,8 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=N
     if have["akku"]:
         imp_all, all_bat, _, _ = battery_arbitrage(hours, imp_all, soc, price, o)
 
-    fix_ct = float(o["festpreis_arbeitspreis_ct_brutto"])
+    # Festpreis je Stunde nach Tarifhistorie (falls gepflegt), sonst aktueller Festpreis
+    fix_hist = parse_price_history(o.get("bezugspreis_historie"), o["festpreis_arbeitspreis_ct_brutto"], tz)
     fix_h = fix_fixed_eur_year(o) / HOURS_PER_YEAR
     dyn_h = dyn_fixed_eur_year(o) / HOURS_PER_YEAR
     feed_ct = float(o["einspeiseverguetung_ct"])
@@ -385,7 +411,7 @@ def simulate(hours, imp, exp, ev, soc, spot, o, tz: ZoneInfo, wp=None, wp_pmax=N
                 "soc": soc[k],
                 "spot": spot[k] / 10.0,
                 "p": p,
-                "fix": imp[k] * fix_ct / 100.0 + fix_h,
+                "fix": imp[k] * price_at(fix_hist, hours[k]) / 100.0 + fix_h,
                 "dyn": cost(imp[k]),
                 "dyn_ev": cost(imp_ev[k]),
                 "dyn_wp": cost(imp_wp[k]),

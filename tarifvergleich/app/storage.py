@@ -17,33 +17,9 @@ import datetime as dt
 import math
 from zoneinfo import ZoneInfo
 
-from .sim import dyn_price_ct
+from .sim import dyn_price_ct, parse_price_history, price_at
 
 C_RATE = 0.5  # max. Lade-/Entladeleistung je kWh Kapazität in der Simulation
-
-
-def parse_price_history(entries, fallback_ct: float, tz: ZoneInfo) -> list[tuple[int, float]]:
-    """['2025-01-01=26.19', '2026-10-27=29.17'] -> [(unix_start, ct), ...] sortiert."""
-    out = []
-    for e in entries or []:
-        try:
-            d, v = str(e).split("=", 1)
-            start = dt.datetime.combine(dt.date.fromisoformat(d.strip()), dt.time(0), tz)
-            out.append((int(start.timestamp()), float(v.strip().replace(",", "."))))
-        except ValueError:
-            continue
-    out.sort()
-    return out or [(0, float(fallback_ct))]
-
-
-def price_at(hist: list[tuple[int, float]], ts: int) -> float:
-    p = hist[0][1]
-    for start, ct in hist:
-        if ts >= start:
-            p = ct
-        else:
-            break
-    return p
 
 
 def simulate_storage(surplus, deficit, cap_kwh, max_kw, eta):

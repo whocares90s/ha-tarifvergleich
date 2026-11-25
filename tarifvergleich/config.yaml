@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.5.2"
+version: "0.6.0"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -15,7 +15,7 @@ ingress_port: 8099
 panel_icon: mdi:cash-clock
 panel_title: Tarifvergleich
 options:
-  startdatum: "2026-02-01"
+  startdatum: "2025-01-23"
   statistik_netzbezug: sensor.ebz_energy_in
   statistik_einspeisung: sensor.ebz_energy_out
   pv_statistiken:
@@ -64,8 +64,6 @@ options:
   akku_mindest_spread_ct: 3.0
   akku_statistik_laden: sensor.deye_sunsynk_sol_ark_3_phase_battery_energy_in
   akku_statistik_entladen: sensor.deye_sunsynk_sol_ark_3_phase_battery_energy_out
-  speicher_statistik_netzbezug: sensor.deye_sunsynk_sol_ark_3_phase_grid_energy_in
-  speicher_statistik_einspeisung: sensor.deye_sunsynk_sol_ark_3_phase_grid_energy_out
   bezugspreis_historie:
     - "2025-01-01=26.19"
     - "2026-10-27=29.17"
@@ -130,8 +128,6 @@ schema:
   akku_mindest_spread_ct: float
   akku_statistik_laden: str?
   akku_statistik_entladen: str?
-  speicher_statistik_netzbezug: str?
-  speicher_statistik_einspeisung: str?
   bezugspreis_historie:
     - match(^\d{4}-\d{2}-\d{2}=\d+([.,]\d+)?$)
   speicher_bestand_kwh: float
