@@ -1,5 +1,5 @@
 name: WattWert
-version: "0.10.0"
+version: "0.10.1"
 slug: tarifvergleich
 description: Was ist jede kWh wert? Tarifvergleich fix vs. dynamisch, Lastverschiebung, PV- und Speicher-Wirtschaftlichkeit.
 url: https://github.com/whocares90s/ha-tarifvergleich

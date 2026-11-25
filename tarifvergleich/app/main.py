@@ -163,7 +163,21 @@ class Engine:
         pos = lambda d, h: max(0.0, d.get(h, 0.0))  # noqa: E731
         imp = [pos(imp_d, h) for h in hours]
         exp = [pos(exp_d, h) for h in hours]
-        ev = [sum(pos(d, h) for d in ev_ds) for h in hours]
+        # Wallbox-Zähler: Sprünge über das physikalisch Mögliche (Zähler-Reset, Nachbuchung) verwerfen
+        ev_cap = float(o.get("ev_max_kw", 11.0))
+        ev_bad = 0
+
+        def ev_val(d: dict, h: int) -> float:
+            nonlocal ev_bad
+            v = pos(d, h)
+            if v > ev_cap * 1.5:
+                ev_bad += 1
+                return 0.0
+            return min(v, ev_cap)
+
+        ev = [sum(ev_val(d, h) for d in ev_ds) for h in hours]
+        if ev_bad:
+            _LOG.info("Wallbox-Statistik: %d Stundenwerte über %.0f kWh verworfen (Zähler-Reset)", ev_bad, ev_cap * 1.5)
         pv = [sum(pos(d, h) for d in pv_ds) for h in hours]
         wp = [pos(wp_d, h) for h in hours]
         wp_pmax = [pmax_d.get(h) for h in hours]

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- Wallbox-Statistiken: Stundenwerte über 1,5 × max. Ladeleistung werden verworfen (Zähler-Reset, z. B. Monta-Livo am 23.11.2026 mit 132 kWh Phantom-Ladung), sonst auf die max. Ladeleistung begrenzt
+
 ## 0.10.0
 
 - **Abschlag Ist/Soll** in der Übersicht: Netzbezug im Vertragsjahr gegen die vereinbarte Jahresmenge, saisonal nach eigenem Monatsprofil (lernt mit jedem abgeschlossenen Monat) und optional gleichmäßig verteilt
