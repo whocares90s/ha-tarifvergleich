@@ -1,5 +1,5 @@
 name: Tarifvergleich
-version: "0.4.0"
+version: "0.5.0"
 slug: tarifvergleich
 description: Simuliert die Stromkosten mit dynamischem Tarif (Tibber-Formel) gegenüber dem Festpreis – rückwirkend und laufend.
 url: https://github.com/whocares90s/ha-tarifvergleich
@@ -77,6 +77,9 @@ options:
   akku_leistung_erweiterung: sensor.felicity_solar_battery_074504828026090487_power
   speicher_nutzbar_prozent: 80
   wechselrichter_max_kw: 12.0
+  pv_anlage_kosten_eur: 4000
+  pv_dach_statistik: sensor.deye_sunsynk_sol_ark_3_phase_pv_energy
+  pv_kosten_inkl_weitere_pv: true
   log_level: info
 schema:
   startdatum: match(^\d{4}-\d{2}-\d{2}$)
@@ -137,4 +140,7 @@ schema:
   akku_leistung_erweiterung: str?
   speicher_nutzbar_prozent: float(10,100)
   wechselrichter_max_kw: float
+  pv_anlage_kosten_eur: float?
+  pv_dach_statistik: str?
+  pv_kosten_inkl_weitere_pv: bool
   log_level: list(debug|info|warning|error)

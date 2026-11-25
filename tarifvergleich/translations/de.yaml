@@ -129,5 +129,14 @@ configuration:
     description: Für die Simulation des Zusatznutzens, z. B. 80 bei 20 % Mindest-Ladestand.
   wechselrichter_max_kw:
     name: Speicher – max. Lade-/Entladeleistung Wechselrichter (kW)
+  pv_anlage_kosten_eur:
+    name: PV-Anlage – Anschaffungskosten ohne Speicher (€, optional)
+    description: Module, Wechselrichter, Montage. Zusammen mit den Speicherkosten ergibt das die Gesamtinvestition.
+  pv_dach_statistik:
+    name: PV-Anlage – Statistik Hauptanlage (kWh)
+    description: Ertrag der Hauptanlage; weitere Anlagen aus „Statistiken PV-Ertrag“ werden separat ausgewiesen.
+  pv_kosten_inkl_weitere_pv:
+    name: PV-Anlage – Kosten enthalten weitere PV (z. B. Garage)
+    description: An = Ertrag der weiteren PV-Anlagen zählt in die Amortisation mit.
   log_level:
     name: Log-Level

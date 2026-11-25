@@ -204,8 +204,11 @@ class Engine:
             return
         start = dt.datetime.combine(dt.date.fromisoformat(o["speicher_bestand_start"]), dt.time(0), TZ)
         pv_ids = [s for s in (o.get("pv_statistiken") or []) if s]
+        roof_id = o.get("pv_dach_statistik") or ""
         ids = [o["akku_statistik_laden"], o["akku_statistik_entladen"], o["statistik_netzbezug"],
                o["statistik_einspeisung"], *pv_ids]
+        if roof_id and roof_id not in ids:
+            ids.append(roof_id)
         stats = await self.ha.statistics(ids, start, end, ["change"], {"energy": "kWh"})
         p_ids = [x for x in (o.get("akku_leistung_bestand"), o.get("akku_leistung_erweiterung")) if x]
         p_stats = await self.ha.statistics(p_ids, start, end, ["mean"], {"power": "W"}) if p_ids else {}
@@ -217,6 +220,7 @@ class Engine:
         imp_d = _series(stats, o["statistik_netzbezug"], "change")
         exp_d = _series(stats, o["statistik_einspeisung"], "change")
         pv_ds = [_series(stats, sid, "change") for sid in pv_ids]
+        roof_d = _series(stats, roof_id, "change") if roof_id else None
         w_old_d = _series(p_stats, o.get("akku_leistung_bestand") or "", "mean")
         w_ext_d = _series(p_stats, o.get("akku_leistung_erweiterung") or "", "mean")
 
@@ -238,6 +242,7 @@ class Engine:
             [absw(w_old_d, h) for h in hours],
             [absw(w_ext_d, h) for h in hours],
             o, TZ,
+            pv_roof=[pos(roof_d, h) for h in hours] if roof_d is not None else None,
         )
         live = await self._battery_live()
         daily = storage.aggregate(res["rows"], TZ, "day")
@@ -245,7 +250,8 @@ class Engine:
             "summary": storage.summary(res, o, TZ, live),
             "monthly": storage.aggregate(res["rows"], TZ, "month"),
             "daily": [{"key": d["key"], "s_old": d["s_old"], "s_ext": d["s_ext"], "marg": d["marg"],
-                       "s_fix": d["s_fix"]} for d in daily],
+                       "s_fix": d["s_fix"], "s_pv_roof": d["s_pv_roof"], "s_pv_other": d["s_pv_other"]}
+                      for d in daily],
         }
         s = self.storage["summary"]
         _LOG.info("Speicher: %.0f kWh entladen, Ersparnis %.2f € (Bestand %.2f €, Erweiterung anteilig %.2f €, "
@@ -273,6 +279,19 @@ class Engine:
         if e.get("amortisation"):
             attrs["erweiterung_amortisiert_prozent"] = round(e["amortisation"]["prozent"], 1)
         await self.ha.set_state("sensor.tarifvergleich_speicher_ersparnis", round(s["s_fix"], 2), attrs)
+
+        a = s.get("anlage") or {}
+        if a.get("amortisation"):
+            am = a["amortisation"]
+            await self.ha.set_state("sensor.tarifvergleich_pv_anlage_ersparnis", round(a["ersparnis"], 2), {
+                "friendly_name": "Tarifvergleich Ersparnis PV-Anlage gesamt",
+                "unit_of_measurement": "EUR", "device_class": "monetary", "icon": "mdi:solar-power-variant",
+                "seit": s["von"], "investition_eur": round(am["kosten"], 2),
+                "amortisiert_prozent": round(am["prozent"], 1), "pro_jahr_eur": round(a["pro_jahr"], 2),
+                "rest_jahre": _r(am.get("rest_jahre"), 1), "break_even": am.get("break_even"),
+                "dach_pv_eur": round(s["s_pv_roof"], 2), "speicher_eur": round(s["s_fix"], 2),
+                "weitere_pv_eur": round(s["s_pv_other"], 2),
+            })
 
     async def _import_storage_statistics(self, rows: list[dict]) -> None:
         if not rows:

@@ -66,9 +66,11 @@ def simulate_storage(surplus, deficit, cap_kwh, max_kw, eta):
     return ins, outs
 
 
-def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInfo) -> dict:
-    """hours: Unix-Stundenbeginn; b_in/b_out/pv: kWh; imp/exp: kWh oder None (keine Netzdaten);
-    spot: €/MWh oder None; w_old/w_ext: |mittlere Leistung| je Akku in W oder None."""
+def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInfo, pv_roof=None) -> dict:
+    """hours: Unix-Stundenbeginn; b_in/b_out/pv: kWh (pv = alle PV-Anlagen); imp/exp: kWh oder None
+    (keine Netzdaten); spot: €/MWh oder None; w_old/w_ext: |mittlere Leistung| je Akku in W oder None;
+    pv_roof: Ertrag der Hauptanlage (Dach) in kWh, None = alles ist Hauptanlage."""
+    pv_roof = pv_roof if pv_roof is not None else pv
     n = len(hours)
     hist = parse_price_history(o.get("bezugspreis_historie"), o["festpreis_arbeitspreis_ct_brutto"], tz)
     feed = float(o["einspeiseverguetung_ct"])
@@ -94,6 +96,13 @@ def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInf
         pd = dyn_price_ct(spot[k], o) if spot[k] is not None else None
         s_dyn = (b_out[k] * pd - pvc * feed - gc * pd) / 100.0 if pd is not None else None
 
+        # PV ohne Speicher: direkter Eigenverbrauch spart Bezug, Rest (Einspeisung + was in den Akku
+        # ging) wäre ohne Speicher eingespeist worden -> Vergütung. Speicher-Mehrwert steckt in s_fix.
+        e = exp[k] if exp[k] is not None else 0.0
+        selfc = max(0.0, pv[k] - e - pvc)
+        pv_val = (selfc * P + (e + pvc) * feed) / 100.0
+        roof_share = min(1.0, pv_roof[k] / pv[k]) if pv[k] > 0.001 else 1.0
+
         if not has_ext or h < t_ext:
             share = 0.0
         elif w_old[k] is not None and w_ext[k] is not None and (w_old[k] + w_ext[k]) > 10:
@@ -106,6 +115,9 @@ def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInf
             "s_fix": s_fix, "s_ext": s_fix * share, "s_old": s_fix * (1.0 - share),
             "s_dyn": s_dyn, "known": known, "imp": imp[k], "exp": exp[k],
             "marg": 0.0, "marg_year": 0.0,
+            "pv": pv[k], "pv_roof": pv_roof[k], "selfc": selfc, "exp_kwh": e,
+            "self_val": selfc * P / 100.0, "feed_rev": (e + pvc) * feed / 100.0,
+            "s_pv_roof": pv_val * roof_share, "s_pv_other": pv_val * (1.0 - roof_share),
         })
 
     # --- Zusatznutzen der Erweiterung (nur wo Netzdaten vorhanden sind)
@@ -147,7 +159,8 @@ def analyze(hours, b_in, b_out, pv, imp, exp, spot, w_old, w_ext, o, tz: ZoneInf
 
 
 SUM_KEYS = ("b_in", "b_out", "pvc", "gc", "avoided", "lost_feed", "grid_cost", "s_fix", "s_old", "s_ext",
-            "marg", "marg_year")
+            "marg", "marg_year", "pv", "pv_roof", "selfc", "exp_kwh", "self_val", "feed_rev",
+            "s_pv_roof", "s_pv_other")
 
 
 def aggregate(rows, tz: ZoneInfo, key: str) -> list[dict]:
@@ -190,7 +203,27 @@ def summary(res: dict, o: dict, tz: ZoneInfo, live: dict) -> dict:
                 "gesamt_jahre": cost / per_year if per_year > 0 else None}
 
     ext_start = o.get("speicher_erweiterung_start") or None
+
+    # --- Gesamtanlage: PV (Dach, ggf. inkl. weiterer PV) + Speicher
+    cost_pv = float(o.get("pv_anlage_kosten_eur") or 0)
+    incl_other = bool(o.get("pv_kosten_inkl_weitere_pv", True))
+    sys_key = lambda r: r["s_pv_roof"] + r["s_fix"] + (r["s_pv_other"] if incl_other else 0.0)  # noqa: E731
+    sys_done = sum(sys_key(r) for r in rows)
+    sys_year = sum(sys_key(r) for r in y_rows) * (365.0 / y_days if y_days else 0.0)
+    sys_cost = cost_pv + cost_old + cost_ext
+    roof_year = sum(r["s_pv_roof"] for r in y_rows) * (365.0 / y_days if y_days else 0.0)
+    sys_pay = payback(sys_cost, sys_done, sys_year) if cost_pv else None
+    if sys_pay and sys_pay["rest_jahre"] is not None:
+        sys_pay["break_even"] = (dt.datetime.fromtimestamp(last, tz)
+                                 + dt.timedelta(days=365.0 * sys_pay["rest_jahre"])).date().isoformat()
+    anlage = {
+        "kosten_pv": cost_pv, "weitere_eingerechnet": incl_other,
+        "ersparnis": sys_done, "pro_jahr": sys_year, "dach_pro_jahr": roof_year,
+        "amortisation": sys_pay,
+    }
+
     return {
+        "anlage": anlage,
         **tot,
         "von": dt.datetime.fromtimestamp(rows[0]["t"], tz).isoformat(),
         "bis": dt.datetime.fromtimestamp(last + 3600, tz).isoformat(),

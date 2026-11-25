@@ -64,6 +64,9 @@ DEFAULTS: dict = {
     "akku_leistung_erweiterung": "",
     "speicher_nutzbar_prozent": 80.0,
     "wechselrichter_max_kw": 10.0,
+    "pv_anlage_kosten_eur": 0,
+    "pv_dach_statistik": "",
+    "pv_kosten_inkl_weitere_pv": True,
     "log_level": "info",
 }
 

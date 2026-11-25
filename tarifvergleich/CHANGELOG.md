@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- Reiter heißt jetzt **PV & Speicher** und zeigt zusätzlich die **gesamte PV-Anlage**: Ersparnis gegenüber
+  „ohne PV“ (Eigenverbrauch × Bezugspreis + Einspeisung × Vergütung + Speicher-Mehrwert), aufgeteilt in
+  Dach-PV, weitere PV (Garage) und Speicher
+- Amortisation der Gesamtinvestition inkl. Break-even-Prognose; neuer Sensor `sensor.tarifvergleich_pv_anlage_ersparnis`
+- Neue Optionen `pv_anlage_kosten_eur`, `pv_dach_statistik`, `pv_kosten_inkl_weitere_pv`
+- Hinweis: Netzladung zum Kalibrieren kostet unterm Strich nur die Verluste
+
 ## 0.4.0
 
 - Neuer Reiter **Speicher**: Ersparnis des Batteriespeichers seit Inbetriebnahme gegenüber PV ohne Speicher
